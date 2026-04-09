@@ -463,18 +463,6 @@ def update_position_prices(df_map: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     return out
 
 
-def highlight_signal(val):
-    if val == "突破買進":
-        return "background-color:#153e2f;color:#d7ffd9;font-weight:bold;"
-    if val == "5MA承接":
-        return "background-color:#3e3415;color:#fff2c7;font-weight:bold;"
-    if val == "趨勢續抱":
-        return "background-color:#142a40;color:#d6ebff;"
-    if val == "資料不足":
-        return "background-color:#4a1f1f;color:#ffd7d7;"
-    return ""
-
-
 def run_scan(
     symbols_tw: List[str],
     symbols_us: List[str],
@@ -647,11 +635,7 @@ with tab1:
     if top3_df.empty:
         st.warning("尚無可用結果")
     else:
-        st.dataframe(
-            top3_df.style.applymap(highlight_signal, subset=["訊號"]),
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.dataframe(top3_df, use_container_width=True, hide_index=True)
 
         quick_cards = st.columns(min(3, len(top3_df)))
         for i, (_, row) in enumerate(top3_df.iterrows()):
@@ -666,11 +650,7 @@ with tab1:
         draw_chart_no_plotly(df_map.get(symbol, pd.DataFrame()), symbol)
 
         st.subheader("完整排行")
-        st.dataframe(
-            scan_df.style.applymap(highlight_signal, subset=["訊號"]),
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.dataframe(scan_df, use_container_width=True, hide_index=True)
 
 with tab2:
     st.subheader("國泰手動下單表")
@@ -737,11 +717,7 @@ with tab3:
     position_scan_df = st.session_state.get("position_scan_df", pd.DataFrame())
     if not position_scan_df.empty:
         st.subheader("持倉即時掃描結果")
-        st.dataframe(
-            position_scan_df.style.map(highlight_signal, subset=["訊號"]),
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.dataframe(position_scan_df, use_container_width=True, hide_index=True)
 
 with tab4:
     st.subheader("交易紀錄")
@@ -789,13 +765,13 @@ with tab5:
     with x2:
         st.info("已設定 LINE secrets" if line_enabled() else "尚未設定 LINE secrets")
 
-    st.markdown("**上帝視角 功能**")
+    st.markdown("**上帝視角 穩定版功能**")
     st.markdown(
         "- 盤中自動刷新\n"
-        "- 訊號色塊高亮\n"
         "- 無 Plotly 依賴\n"
         "- 持倉代碼自動補名稱\n"
-        "- 持倉即時掃描按鈕"
+        "- 持倉即時掃描按鈕\n"
+        "- 去除 Styler 相容性問題"
     )
 
     st.markdown("**注意**")

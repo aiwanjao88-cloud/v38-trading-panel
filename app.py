@@ -6,7 +6,7 @@ import requests
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="上帝視角 V11", page_icon="📈", layout="wide")
+st.set_page_config(page_title="上帝視角 V16", page_icon="👑", layout="wide")
 
 # =========================================================
 # 固定參數
@@ -139,7 +139,7 @@ def get_confidence_color(score: Optional[float]) -> str:
 
 
 # =========================================================
-# 黑金介面
+# 黑金旗艦介面
 # =========================================================
 st.markdown(
     """
@@ -212,7 +212,7 @@ st.markdown(
         border: 1px solid rgba(212,175,55,.16);
         border-radius: 22px;
         padding: 18px;
-        min-height: 360px;
+        min-height: 390px;
         box-shadow: 0 14px 26px rgba(0,0,0,.34);
     }
 
@@ -322,13 +322,14 @@ def get_twse_name_map() -> Dict[str, str]:
         return {}
     if "代碼" not in df.columns or "股名" not in df.columns:
         return {}
-    name_map = {}
+
+    out = {}
     for _, row in df.iterrows():
         code = clean_text(row.get("代碼"))
         name = clean_text(row.get("股名"))
         if code and name:
-            name_map[code] = name
-    return name_map
+            out[code] = name
+    return out
 
 
 @st.cache_data(ttl=180)
@@ -355,13 +356,11 @@ def get_display_name(symbol: str) -> str:
     code = to_tw_code(symbol)
     tw_map = get_twse_name_map()
 
-    # 強制優先 TWSE 中文名稱
     if code in tw_map:
-        name = clean_text(tw_map[code])
+        name = clean_text(tw_map.get(code))
         if name:
             return name
 
-    # fallback
     return clean_text(get_yf_info(symbol).get("股名", code))
 
 
@@ -413,34 +412,39 @@ def calc_score(symbol: str, stop_loss_pct: float, take_profit_pct: float) -> Dic
     df = fetch_price_history(symbol, "6mo")
     display_name = get_display_name(symbol)
 
+    base = {
+        "市場": "台股",
+        "代碼": to_tw_code(symbol),
+        "股名": display_name,
+        "族群": get_sector_for_symbol(symbol),
+        "收盤": display_str(info.get("目前價")),
+        "訊號": "資料不足",
+        "建議進場價": "",
+        "停損價": "",
+        "第一停利價": "",
+        "風險報酬比": "",
+        "評分": -999,
+        "信心": "未知",
+        "等級": "資料不足",
+        "理由": "資料不足",
+        "異常事件": "",
+        "RSI": "",
+        "開盤策略": "暫不處理",
+    }
+
     if df.empty or len(df) < 65:
-        return {
-            "代碼": to_tw_code(symbol),
-            "股名": display_name,
-            "收盤": display_str(info.get("目前價")),
-            "評分": -999,
-            "等級": "資料不足",
-            "訊號": "資料不足",
-            "建議進場價": "",
-            "停損價": "",
-            "第一停利價": "",
-            "風險報酬比": "",
-            "異常事件": "",
-            "族群": get_sector_for_symbol(symbol),
-            "RSI": "",
-            "開盤策略": "暫不處理",
-        }
+        return base
 
     last = df.iloc[-1]
-    close = safe_float(last["Close"])
-    ma5 = safe_float(last["MA5"])
-    ma20 = safe_float(last["MA20"])
-    ma60 = safe_float(last["MA60"])
-    rsi14 = safe_float(last["RSI14"])
-    vol_ratio = safe_float(last["VolumeRatio"])
-    ret1d = safe_float(last["Ret1D%"])
-    prev20h = safe_float(last["Prev20High"])
-    prev20l = safe_float(last["Prev20Low"])
+    close = safe_float(last.get("Close"))
+    ma5 = safe_float(last.get("MA5"))
+    ma20 = safe_float(last.get("MA20"))
+    ma60 = safe_float(last.get("MA60"))
+    rsi14 = safe_float(last.get("RSI14"))
+    vol_ratio = safe_float(last.get("VolumeRatio"))
+    ret1d = safe_float(last.get("Ret1D%"))
+    prev20h = safe_float(last.get("Prev20High"))
+    prev20l = safe_float(last.get("Prev20Low"))
 
     score = 0
     anomaly = []
@@ -552,7 +556,7 @@ def get_sector_strength_map(scan_df: pd.DataFrame) -> Dict[str, float]:
     if sector_df.empty:
         return strength
     for _, row in sector_df.iterrows():
-        strength[clean_text(row["族群"])] = safe_float(row["平均評分"]) or 0
+        strength[clean_text(row.get("族群", ""))] = safe_float(row.get("平均評分")) or 0
     return strength
 
 
@@ -678,7 +682,7 @@ def build_weekly_summary(order_df: pd.DataFrame, capital: float) -> Dict[str, ob
     }
 
 
-def run_auto_market_scan_v11(capital: float):
+def run_auto_market_scan_v16(capital: float):
     candidate_pool = build_dynamic_tw_scan_pool()
     results = []
 
@@ -798,16 +802,17 @@ def build_position_scan_df(pos_df: pd.DataFrame) -> pd.DataFrame:
             continue
 
         health = calc_score(symbol, FIXED_STOP_LOSS_PCT, FIXED_TAKE_PROFIT_PCT)
+
         rows.append({
-            "代碼": health["代碼"],
-            "股名": health["股名"],
-            "收盤": health["收盤"],
-            "訊號": health["訊號"],
-            "建議進場價": health["建議進場價"],
-            "停損價": health["停損價"],
-            "第一停利價": health["第一停利價"],
-            "評分": health["評分"],
-            "理由": health["理由"],
+            "代碼": clean_text(health.get("代碼", symbol)),
+            "股名": clean_text(health.get("股名", get_display_name(symbol))),
+            "收盤": clean_text(health.get("收盤", "")),
+            "訊號": clean_text(health.get("訊號", "")),
+            "建議進場價": clean_text(health.get("建議進場價", "")),
+            "停損價": clean_text(health.get("停損價", "")),
+            "第一停利價": clean_text(health.get("第一停利價", "")),
+            "評分": clean_text(health.get("評分", "")),
+            "理由": clean_text(health.get("理由", "")),
         })
 
     return as_object_df(pd.DataFrame(rows).sort_values(["評分"], ascending=False).reset_index(drop=True))
@@ -838,7 +843,7 @@ def send_line(text: str) -> Tuple[bool, str]:
 
 
 def build_priority_alerts(top3_df: pd.DataFrame, weekly_summary: Dict[str, object], verdict_title: str) -> str:
-    lines = [f"上帝視角 V11 推薦 {now_str()}"]
+    lines = [f"上帝視角 V16 推薦 {now_str()}"]
     lines.append(f"今日判斷：{verdict_title}")
 
     if pd.DataFrame(top3_df).empty:
@@ -880,7 +885,7 @@ init_state()
 # =========================================================
 # Sidebar
 # =========================================================
-st.sidebar.title("👑 上帝視角 V11 設定")
+st.sidebar.title("👑 上帝視角 V16 設定")
 capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CAPITAL, step=10000)
 
 # =========================================================
@@ -889,15 +894,15 @@ capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CA
 st.markdown(
     """
     <div class="hero-card">
-        <div class="title-xl">👑 上帝視角 V11 黑金專業版</div>
-        <div class="muted">台股股名優先使用 TWSE 中文名稱｜黑金風格介面｜今日是否適合開新倉判斷</div>
+        <div class="title-xl">👑 上帝視角 V16 黑金旗艦穩定版</div>
+        <div class="muted">已修正 position_scan_df 的 KeyError｜全 dict 改為安全 .get 模式｜黑金旗艦介面</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 if st.session_state["top3_df"].empty:
-    run_auto_market_scan_v11(capital)
+    run_auto_market_scan_v16(capital)
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("總資金", f"{capital:,.0f}")
@@ -919,7 +924,7 @@ with i3:
 with st.container():
     st.markdown('<div class="top-btn">', unsafe_allow_html=True)
     if st.button("🚀 依總資金重新推薦本週標的", use_container_width=True):
-        run_auto_market_scan_v11(capital)
+        run_auto_market_scan_v16(capital)
     st.markdown("</div>", unsafe_allow_html=True)
 
 scan_df = as_object_df(st.session_state["scan_df"])
@@ -989,7 +994,7 @@ with tab2:
         st.download_button(
             "⬇️ 下載下單表 CSV",
             order_df.to_csv(index=False).encode("utf-8-sig"),
-            "god_view_v11_orders.csv",
+            "god_view_v16_orders.csv",
             "text/csv"
         )
 
@@ -1044,4 +1049,4 @@ with tab4:
             st.error(msg)
 
 st.markdown("---")
-st.caption("上帝視角 V11｜黑金專業版｜中文股名強制優先顯示")
+st.caption("上帝視角 V16｜黑金旗艦穩定版｜已修正 KeyError: 理由")

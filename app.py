@@ -32,7 +32,7 @@ TRADE_LOG_COLUMNS = ["日期", "市場", "代碼", "動作", "價格", "數量",
 
 
 # =========================
-# 共用工具
+# 工具函式
 # =========================
 def now_str() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -84,7 +84,6 @@ def to_tw_code(symbol: str) -> str:
 def to_yf_symbol(symbol: str, market: str = "") -> str:
     symbol = normalize_symbol(symbol)
     market = infer_market(symbol, market)
-
     if not symbol:
         return ""
     if market == "台股":
@@ -196,101 +195,34 @@ def fetch_twse_bwibbu_all() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def get_tw_stock_info_from_yf(code: str) -> Dict[str, object]:
-    symbol = f"{to_tw_code(code)}.TW"
-    result = {
-        "代碼": to_tw_code(code),
-        "股名": to_tw_code(code),
-        "目前價": None,
-        "開盤價": None,
-        "最高價": None,
-        "最低價": None,
-        "成交股數": None,
-        "本益比": None,
-        "殖利率%": None,
-        "股價淨值比": None,
-    }
-
-    try:
-        t = yf.Ticker(symbol)
-        hist = t.history(period="5d")
-        if hist is not None and not hist.empty:
-            last = hist.iloc[-1]
-            result["目前價"] = safe_float(last.get("Close"))
-            result["開盤價"] = safe_float(last.get("Open"))
-            result["最高價"] = safe_float(last.get("High"))
-            result["最低價"] = safe_float(last.get("Low"))
-            result["成交股數"] = safe_float(last.get("Volume"))
-
-        info = t.info if hasattr(t, "info") else {}
-        result["股名"] = info.get("shortName") or info.get("longName") or result["代碼"]
-        result["本益比"] = safe_float(info.get("trailingPE"))
-        result["殖利率%"] = round(float(info.get("dividendYield", 0)) * 100, 2) if info.get("dividendYield") is not None else None
-        result["股價淨值比"] = safe_float(info.get("priceToBook"))
-    except Exception:
-        pass
-
-    return result
+def get_twse_day_row(code: str) -> Optional[dict]:
+    df = fetch_twse_stock_day_all()
+    if df.empty or "代碼" not in df.columns:
+        return None
+    match = df[df["代碼"] == code]
+    if match.empty:
+        return None
+    return match.iloc[0].to_dict()
 
 
-@st.cache_data(ttl=120)
-def get_tw_stock_info(code: str) -> Dict[str, object]:
-    code = to_tw_code(code)
-    day_df = fetch_twse_stock_day_all()
-    bw_df = fetch_twse_bwibbu_all()
-
-    result = {
-        "代碼": code,
-        "股名": code,
-        "目前價": None,
-        "開盤價": None,
-        "最高價": None,
-        "最低價": None,
-        "成交股數": None,
-        "本益比": None,
-        "殖利率%": None,
-        "股價淨值比": None,
-    }
-
-    if not day_df.empty and "代碼" in day_df.columns:
-        match = day_df[day_df["代碼"] == code]
-        if not match.empty:
-            row = match.iloc[0]
-            result["股名"] = row.get("股名", code)
-            result["目前價"] = row.get("收盤價", None)
-            result["開盤價"] = row.get("開盤價", None)
-            result["最高價"] = row.get("最高價", None)
-            result["最低價"] = row.get("最低價", None)
-            result["成交股數"] = row.get("成交股數", None)
-
-    if not bw_df.empty and "代碼" in bw_df.columns:
-        match2 = bw_df[bw_df["代碼"] == code]
-        if not match2.empty:
-            row2 = match2.iloc[0]
-            if result["股名"] == code:
-                result["股名"] = row2.get("股名", code)
-            result["本益比"] = row2.get("本益比", None)
-            result["殖利率%"] = row2.get("殖利率%", None)
-            result["股價淨值比"] = row2.get("股價淨值比", None)
-
-    if result["目前價"] is None or result["股名"] == code:
-        yf_result = get_tw_stock_info_from_yf(code)
-        for k, v in yf_result.items():
-            if result.get(k) in [None, "", code]:
-                result[k] = v
-
-    return result
+def get_twse_bw_row(code: str) -> Optional[dict]:
+    df = fetch_twse_bwibbu_all()
+    if df.empty or "代碼" not in df.columns:
+        return None
+    match = df[df["代碼"] == code]
+    if match.empty:
+        return None
+    return match.iloc[0].to_dict()
 
 
 # =========================
-# 美股資料
+# yfinance 補資料
 # =========================
 @st.cache_data(ttl=180)
-def get_us_stock_info(symbol: str) -> Dict[str, object]:
-    symbol = normalize_symbol(symbol)
+def get_yf_info(symbol: str, market: str = "") -> Dict[str, object]:
+    yf_symbol = to_yf_symbol(symbol, market)
     result = {
-        "代碼": symbol,
-        "股名": symbol,
+        "股名": normalize_symbol(symbol),
         "目前價": None,
         "開盤價": None,
         "最高價": None,
@@ -302,7 +234,7 @@ def get_us_stock_info(symbol: str) -> Dict[str, object]:
     }
 
     try:
-        t = yf.Ticker(symbol)
+        t = yf.Ticker(yf_symbol)
         hist = t.history(period="5d")
         if hist is not None and not hist.empty:
             last = hist.iloc[-1]
@@ -313,7 +245,7 @@ def get_us_stock_info(symbol: str) -> Dict[str, object]:
             result["成交股數"] = safe_float(last.get("Volume"))
 
         info = t.info if hasattr(t, "info") else {}
-        result["股名"] = info.get("shortName") or info.get("longName") or symbol
+        result["股名"] = info.get("shortName") or info.get("longName") or result["股名"]
         result["本益比"] = safe_float(info.get("trailingPE"))
         result["殖利率%"] = round(float(info.get("dividendYield", 0)) * 100, 2) if info.get("dividendYield") is not None else None
         result["股價淨值比"] = safe_float(info.get("priceToBook"))
@@ -323,16 +255,72 @@ def get_us_stock_info(symbol: str) -> Dict[str, object]:
     return result
 
 
-def get_stock_info(symbol: str, market: str) -> Dict[str, object]:
+# =========================
+# 合併後股票資訊
+# =========================
+@st.cache_data(ttl=120)
+def get_stock_info(symbol: str, market: str = "") -> Dict[str, object]:
     symbol = normalize_symbol(symbol)
     market = infer_market(symbol, market)
+
     if market == "台股":
-        return get_tw_stock_info(symbol)
-    return get_us_stock_info(symbol)
+        code = to_tw_code(symbol)
+
+        twse_day = get_twse_day_row(code)
+        twse_bw = get_twse_bw_row(code)
+        yf_info = get_yf_info(code, "台股")
+
+        result = {
+            "代碼": code,
+            "股名": code,
+            "目前價": None,
+            "開盤價": None,
+            "最高價": None,
+            "最低價": None,
+            "成交股數": None,
+            "本益比": None,
+            "殖利率%": None,
+            "股價淨值比": None,
+        }
+
+        if twse_day:
+            result["股名"] = twse_day.get("股名", code) or code
+            result["目前價"] = twse_day.get("收盤價", None)
+            result["開盤價"] = twse_day.get("開盤價", None)
+            result["最高價"] = twse_day.get("最高價", None)
+            result["最低價"] = twse_day.get("最低價", None)
+            result["成交股數"] = twse_day.get("成交股數", None)
+
+        if twse_bw:
+            result["股名"] = twse_bw.get("股名", result["股名"]) or result["股名"]
+            result["本益比"] = twse_bw.get("本益比", None)
+            result["殖利率%"] = twse_bw.get("殖利率%", None)
+            result["股價淨值比"] = twse_bw.get("股價淨值比", None)
+
+        # fallback：TWSE 空白時用 yfinance 補
+        for k in ["股名", "目前價", "開盤價", "最高價", "最低價", "成交股數", "本益比", "殖利率%", "股價淨值比"]:
+            if result.get(k) in [None, "", code]:
+                result[k] = yf_info.get(k)
+
+        return result
+
+    us_info = get_yf_info(symbol, "美股")
+    return {
+        "代碼": symbol,
+        "股名": us_info.get("股名", symbol),
+        "目前價": us_info.get("目前價"),
+        "開盤價": us_info.get("開盤價"),
+        "最高價": us_info.get("最高價"),
+        "最低價": us_info.get("最低價"),
+        "成交股數": us_info.get("成交股數"),
+        "本益比": us_info.get("本益比"),
+        "殖利率%": us_info.get("殖利率%"),
+        "股價淨值比": us_info.get("股價淨值比"),
+    }
 
 
 # =========================
-# 技術分析
+# 歷史技術資料
 # =========================
 def rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
@@ -347,12 +335,12 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
 @st.cache_data(ttl=180)
 def fetch_price_history(symbol: str, period: str = "6mo", market: str = "") -> pd.DataFrame:
     market = infer_market(symbol, market)
-    symbol = to_yf_symbol(symbol, market)
-    if not symbol:
+    yf_symbol = to_yf_symbol(symbol, market)
+    if not yf_symbol:
         return pd.DataFrame()
 
     try:
-        df = yf.download(symbol, period=period, interval="1d", auto_adjust=False, progress=False)
+        df = yf.download(yf_symbol, period=period, interval="1d", auto_adjust=False, progress=False)
         if df is None or df.empty:
             return pd.DataFrame()
 
@@ -456,7 +444,7 @@ def calc_signal(df: pd.DataFrame, stop_loss_pct: float, take_profit_pct: float) 
 
 
 # =========================
-# 持倉資料
+# 持倉
 # =========================
 def ensure_position_columns(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(df).copy()
@@ -534,20 +522,30 @@ def build_position_scan_df(pos_df: pd.DataFrame, period: str, stop_loss_pct: flo
 
         df = fetch_price_history(symbol, period=period, market=market)
         sig = calc_signal(df, stop_loss_pct, take_profit_pct)
-        close_val = sig["close"]
-        if close_val is None:
-            info = get_stock_info(symbol, market)
-            close_val = info.get("目前價")
+        info = get_stock_info(symbol, market)
+
+        close_val = sig["close"] if sig["close"] is not None else info.get("目前價")
+        entry_val = sig["entry"]
+        stop_val = sig["stop"]
+        tp1_val = sig["tp1"]
+
+        if close_val is not None and sig["signal"] != "資料不足":
+            if entry_val is None:
+                entry_val = round(float(close_val), 2)
+            if stop_val is None:
+                stop_val = round(float(close_val) * (1 - stop_loss_pct), 2)
+            if tp1_val is None:
+                tp1_val = round(float(close_val) * (1 + take_profit_pct), 2)
 
         rows.append({
             "市場": market,
             "代碼": to_tw_code(symbol) if market == "台股" else symbol,
-            "股名": clean_text(row.get("股名", symbol)),
+            "股名": clean_text(info.get("股名", row.get("股名", symbol))),
             "收盤": display_str(close_val),
             "訊號": clean_text(sig["signal"]),
-            "建議進場價": display_str(sig["entry"]),
-            "停損價": display_str(sig["stop"]),
-            "第一停利價": display_str(sig["tp1"]),
+            "建議進場價": display_str(entry_val),
+            "停損價": display_str(stop_val),
+            "第一停利價": display_str(tp1_val),
             "評分": sig["score"],
             "理由": clean_text(sig["reason"]),
         })
@@ -558,16 +556,15 @@ def build_position_scan_df(pos_df: pd.DataFrame, period: str, stop_loss_pct: flo
 
 
 # =========================
-# 掃描與下單
+# 狙擊清單與下單表
 # =========================
 def recommend_qty(capital: float, alloc_pct: float, entry: Optional[float], market: str) -> Tuple[float, int]:
     budget = capital * alloc_pct
-
     entry = safe_float(entry)
+    market = infer_market("", market)
+
     if entry is None or entry <= 0:
         return budget, 0
-
-    market = infer_market("", market)
 
     if market == "台股":
         qty = int(budget // (entry * 1000))
@@ -599,7 +596,7 @@ def make_order_df(top_df: pd.DataFrame, capital: float, alloc_pct: float) -> pd.
     return as_object_df(pd.DataFrame(rows))
 
 
-def build_scan_row(symbol: str, market: str, period: str, stop_loss_pct: float, take_profit_pct: float) -> Optional[Dict[str, object]]:
+def build_scan_row(symbol: str, market: str, period: str, stop_loss_pct: float, take_profit_pct: float) -> Dict[str, object]:
     market = infer_market(symbol, market)
     info = get_stock_info(symbol, market)
     df = fetch_price_history(symbol, period=period, market=market)
@@ -610,12 +607,12 @@ def build_scan_row(symbol: str, market: str, period: str, stop_loss_pct: float, 
     stop_val = sig["stop"]
     tp1_val = sig["tp1"]
 
-    if close_val is not None:
-        if entry_val is None and sig["signal"] != "資料不足":
+    if close_val is not None and sig["signal"] != "資料不足":
+        if entry_val is None:
             entry_val = round(float(close_val), 2)
-        if stop_val is None and sig["signal"] != "資料不足":
+        if stop_val is None:
             stop_val = round(float(close_val) * (1 - stop_loss_pct), 2)
-        if tp1_val is None and sig["signal"] != "資料不足":
+        if tp1_val is None:
             tp1_val = round(float(close_val) * (1 + take_profit_pct), 2)
 
     return {
@@ -642,16 +639,14 @@ def run_scan(symbols_tw: List[str], symbols_us: List[str], period: str, stop_los
     for symbol in symbols_tw:
         code = to_tw_code(symbol)
         row = build_scan_row(code, "台股", period, stop_loss_pct, take_profit_pct)
-        if row:
-            results.append(row)
-            df_map[code] = fetch_price_history(code, period=period, market="台股")
+        results.append(row)
+        df_map[code] = fetch_price_history(code, period=period, market="台股")
 
     for symbol in symbols_us:
         s = normalize_symbol(symbol)
         row = build_scan_row(s, "美股", period, stop_loss_pct, take_profit_pct)
-        if row:
-            results.append(row)
-            df_map[s] = fetch_price_history(s, period=period, market="美股")
+        results.append(row)
+        df_map[s] = fetch_price_history(s, period=period, market="美股")
 
     scan_df = pd.DataFrame(results)
     if not scan_df.empty:
@@ -705,13 +700,13 @@ def build_alert_text(top_df: pd.DataFrame) -> str:
     for _, row in pd.DataFrame(top_df).iterrows():
         stock_name = clean_text(row.get("股名", row.get("代碼", "")))
         lines.append(
-            f"{clean_text(row.get('代碼', ''))} {stock_name}｜{clean_text(row.get('訊號', ''))}｜進場 {clean_text(row.get('建議進場價', ''))}｜停損 {clean_text(row.get('停損價', ''))}｜停利 {clean_text(row.get('第一停利價', ''))}"
+            f"{clean_text(row.get('代碼', ''))} {stock_name}｜{clean_text(row.get('訊號', ''))}｜進場 {clean_text(row.get('建議進場價', '')) or '-'}｜停損 {clean_text(row.get('停損價', '')) or '-'}｜停利 {clean_text(row.get('第一停利價', '')) or '-'}"
         )
     return "\n".join(lines)
 
 
 # =========================
-# 畫圖與刷新
+# 圖表
 # =========================
 def draw_chart_no_plotly(df: pd.DataFrame, symbol: str):
     if df.empty:
@@ -833,7 +828,7 @@ st.session_state["refresh_seconds"] = refresh_seconds
 # =========================
 # Header
 # =========================
-st.title("📈 上帝視角 TWSE Pro 穩定修復版")
+st.title("📈 上帝視角 TWSE Pro 穩定修正版 v2")
 st.caption("可實戰三檔 / 國泰下單表 / 持倉追蹤 / 即時掃描 / LINE 推播")
 
 m1, m2, m3, m4 = st.columns(4)
@@ -1004,14 +999,13 @@ with tab5:
     with a2:
         st.info("已設定 LINE secrets" if line_enabled() else "尚未設定 LINE secrets")
 
-    st.markdown("**穩定修復版修正內容**")
+    st.markdown("**v2 修正內容**")
     st.markdown(
-        "- 修正持倉追蹤 pandas/pyarrow 型別衝突\n"
-        "- 所有顯示欄位統一用字串回填\n"
-        "- 台股先 TWSE，抓不到自動用 yfinance 補\n"
-        "- 自動判斷市場\n"
-        "- 保留可實戰三檔、下單表、持倉、LINE"
+        "- 修正持倉表型別衝突\n"
+        "- 台股名稱與價格先 TWSE，失敗自動改用 yfinance\n"
+        "- 狙擊清單與持倉掃描補齊收盤 / 進場 / 停損 / 停利\n"
+        "- 保留國泰下單表與 LINE 推播"
     )
 
 st.markdown("---")
-st.caption("上帝視角 TWSE Pro 穩定修復版：研究與決策輔助用途，不保證獲利。")
+st.caption("上帝視角 TWSE Pro 穩定修正版 v2：研究與決策輔助用途，不保證獲利。")

@@ -6,7 +6,7 @@ import requests
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="上帝視角 V10.3", page_icon="📈", layout="wide")
+st.set_page_config(page_title="上帝視角 V10.4", page_icon="📈", layout="wide")
 
 # =========================================================
 # 固定參數
@@ -34,6 +34,11 @@ SECTOR_BUCKETS = {
     "傳產": {"1301", "1303", "2002", "2207"},
     "ETF": {"0050", "0056", "00713", "00878", "00919", "00929", "00940"},
 }
+
+POSITION_COLUMNS = [
+    "市場", "代碼", "股名", "持有數量", "成本價", "目前價", "報酬率%",
+    "停損價", "第一停利價", "狀態"
+]
 
 
 # =========================================================
@@ -127,24 +132,24 @@ def get_confidence_color(score: Optional[float]) -> str:
     if score >= 75:
         return "#10b981"
     if score >= 60:
-        return "#f59e0b"
+        return "#eab308"
     if score >= 45:
-        return "#fb923c"
+        return "#f97316"
     return "#ef4444"
 
 
 # =========================================================
-# 深色介面
+# 介面配色優化
 # =========================================================
 st.markdown(
     """
     <style>
     .stApp {
         background:
-            radial-gradient(circle at top left, rgba(59,130,246,.12), transparent 25%),
-            radial-gradient(circle at top right, rgba(16,185,129,.08), transparent 22%),
-            linear-gradient(180deg, #060b16 0%, #0b1220 40%, #0f172a 100%);
-        color: #e5e7eb;
+            radial-gradient(circle at top left, rgba(56,189,248,.08), transparent 24%),
+            radial-gradient(circle at top right, rgba(99,102,241,.07), transparent 22%),
+            linear-gradient(180deg, #07101d 0%, #0b1423 45%, #0f172a 100%);
+        color: #e5edf7;
     }
 
     .block-container {
@@ -154,61 +159,61 @@ st.markdown(
     }
 
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0b1220 0%, #111827 100%);
-        border-right: 1px solid rgba(148,163,184,.15);
+        background: linear-gradient(180deg, #0a1220 0%, #10192b 100%);
+        border-right: 1px solid rgba(148,163,184,.14);
     }
 
     [data-testid="stSidebar"] * {
-        color: #e5e7eb !important;
+        color: #e5edf7 !important;
     }
 
     div[data-testid="stMetric"] {
-        background: linear-gradient(180deg, rgba(15,23,42,.96), rgba(17,24,39,.96));
-        border: 1px solid rgba(148,163,184,.12);
+        background: linear-gradient(180deg, rgba(13,23,39,.96), rgba(17,24,39,.96));
+        border: 1px solid rgba(125,211,252,.10);
         border-radius: 18px;
         padding: 12px 14px;
-        box-shadow: 0 10px 25px rgba(2,6,23,.35);
+        box-shadow: 0 10px 24px rgba(2,6,23,.28);
     }
 
     .hero-card {
-        background: linear-gradient(135deg, rgba(15,23,42,.96), rgba(17,24,39,.95));
-        border: 1px solid rgba(96,165,250,.18);
+        background: linear-gradient(135deg, rgba(10,18,32,.96), rgba(16,25,43,.96));
+        border: 1px solid rgba(96,165,250,.16);
         border-radius: 24px;
         padding: 20px 20px 16px 20px;
-        box-shadow: 0 18px 40px rgba(2,6,23,.38);
+        box-shadow: 0 18px 36px rgba(2,6,23,.33);
         margin-bottom: 10px;
     }
 
     .title-xl {
-        font-size: 1.2rem;
+        font-size: 1.22rem;
         font-weight: 900;
-        color: #f8fafc;
+        color: #f8fbff;
         margin-bottom: 6px;
         letter-spacing: .2px;
     }
 
     .muted {
-        color: #94a3b8;
+        color: #9fb0c5;
         font-size: .92rem;
     }
 
     .soft-box {
-        background: linear-gradient(180deg, rgba(30,41,59,.95), rgba(15,23,42,.95));
-        border: 1px solid rgba(59,130,246,.16);
+        background: linear-gradient(180deg, rgba(22,33,53,.95), rgba(12,22,38,.95));
+        border: 1px solid rgba(96,165,250,.14);
         border-radius: 16px;
         padding: 14px 16px;
         margin-bottom: 10px;
-        color: #e2e8f0;
-        box-shadow: 0 8px 20px rgba(2,6,23,.28);
+        color: #e2ebf5;
+        box-shadow: 0 8px 18px rgba(2,6,23,.24);
     }
 
     .signal-card {
-        background: linear-gradient(145deg, rgba(15,23,42,.98), rgba(17,24,39,.98));
-        border: 1px solid rgba(148,163,184,.14);
+        background: linear-gradient(145deg, rgba(12,20,34,.98), rgba(17,24,39,.98));
+        border: 1px solid rgba(125,211,252,.10);
         border-radius: 22px;
         padding: 18px;
         min-height: 320px;
-        box-shadow: 0 14px 30px rgba(2,6,23,.4);
+        box-shadow: 0 14px 26px rgba(2,6,23,.32);
     }
 
     .badge {
@@ -232,10 +237,10 @@ st.markdown(
         border-radius: 15px !important;
         height: 3.1rem !important;
         font-weight: 900 !important;
-        background: linear-gradient(90deg, #2563eb, #3b82f6) !important;
+        background: linear-gradient(90deg, #1d4ed8, #2563eb) !important;
         border: none !important;
         color: white !important;
-        box-shadow: 0 10px 22px rgba(37,99,235,.35) !important;
+        box-shadow: 0 10px 20px rgba(37,99,235,.25) !important;
     }
 
     .stTabs [data-baseweb="tab-list"] {
@@ -245,14 +250,14 @@ st.markdown(
     .stTabs [data-baseweb="tab"] {
         border-radius: 12px;
         padding: 10px 14px;
-        background: rgba(15,23,42,.88);
+        background: rgba(13,23,39,.92);
         border: 1px solid rgba(148,163,184,.10);
-        color: #cbd5e1;
+        color: #cdd7e5;
     }
 
     .stTabs [aria-selected="true"] {
-        background: linear-gradient(90deg, rgba(37,99,235,.18), rgba(59,130,246,.18)) !important;
-        border: 1px solid rgba(59,130,246,.25) !important;
+        background: linear-gradient(90deg, rgba(29,78,216,.22), rgba(59,130,246,.18)) !important;
+        border: 1px solid rgba(96,165,250,.24) !important;
         color: #f8fafc !important;
     }
 
@@ -260,14 +265,14 @@ st.markdown(
         border: 1px solid rgba(148,163,184,.10);
         border-radius: 16px;
         overflow: hidden;
-        box-shadow: 0 10px 22px rgba(2,6,23,.22);
+        box-shadow: 0 10px 18px rgba(2,6,23,.20);
     }
 
     .stTextInput input, .stTextArea textarea, .stNumberInput input {
-        background: rgba(15,23,42,.92) !important;
-        color: #e5e7eb !important;
+        background: rgba(14,22,36,.95) !important;
+        color: #e5edf7 !important;
         border-radius: 12px !important;
-        border: 1px solid rgba(148,163,184,.16) !important;
+        border: 1px solid rgba(148,163,184,.14) !important;
     }
     </style>
     """,
@@ -310,6 +315,14 @@ def fetch_twse_stock_day_all() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=120)
+def get_twse_name_map() -> Dict[str, str]:
+    df = fetch_twse_stock_day_all()
+    if df.empty or "代碼" not in df.columns or "股名" not in df.columns:
+        return {}
+    return dict(zip(df["代碼"].astype(str), df["股名"].astype(str)))
+
+
 @st.cache_data(ttl=180)
 def get_yf_info(symbol: str) -> Dict[str, object]:
     yf_symbol = to_yf_symbol(symbol)
@@ -328,6 +341,14 @@ def get_yf_info(symbol: str) -> Dict[str, object]:
         pass
 
     return result
+
+
+def get_display_name(symbol: str) -> str:
+    code = to_tw_code(symbol)
+    tw_map = get_twse_name_map()
+    if code in tw_map and clean_text(tw_map[code]):
+        return clean_text(tw_map[code])
+    return clean_text(get_yf_info(symbol).get("股名", code))
 
 
 @st.cache_data(ttl=180)
@@ -372,16 +393,17 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
 
 
 # =========================================================
-# 掃描評分
+# 掃描
 # =========================================================
 def calc_score(symbol: str, stop_loss_pct: float, take_profit_pct: float) -> Dict[str, object]:
     info = get_yf_info(symbol)
     df = fetch_price_history(symbol, "6mo")
+    display_name = get_display_name(symbol)
 
     if df.empty or len(df) < 65:
         return {
             "代碼": to_tw_code(symbol),
-            "股名": clean_text(info.get("股名", symbol)),
+            "股名": display_name,
             "收盤": display_str(info.get("目前價")),
             "評分": -999,
             "等級": "資料不足",
@@ -468,7 +490,7 @@ def calc_score(symbol: str, stop_loss_pct: float, take_profit_pct: float) -> Dic
     return {
         "市場": "台股",
         "代碼": to_tw_code(symbol),
-        "股名": clean_text(info.get("股名", symbol)),
+        "股名": display_name,
         "族群": get_sector_for_symbol(symbol),
         "收盤": display_str(close),
         "訊號": signal,
@@ -624,7 +646,7 @@ def build_weekly_summary(order_df: pd.DataFrame, capital: float) -> Dict[str, ob
     }
 
 
-def run_auto_market_scan_v10_3(capital: float):
+def run_auto_market_scan_v10_4(capital: float):
     candidate_pool = build_dynamic_tw_scan_pool()
     results = []
 
@@ -671,14 +693,8 @@ def run_auto_market_scan_v10_3(capital: float):
 
 
 # =========================================================
-# 持股與推播
+# 持股 / 推播
 # =========================================================
-POSITION_COLUMNS = [
-    "市場", "代碼", "股名", "持有數量", "成本價", "目前價", "報酬率%",
-    "停損價", "第一停利價", "狀態"
-]
-
-
 def ensure_position_columns(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(df).copy()
     for col in POSITION_COLUMNS:
@@ -707,7 +723,7 @@ def enrich_positions_auto(df: pd.DataFrame) -> pd.DataFrame:
         info = get_yf_info(symbol)
         out.at[idx, "市場"] = "台股"
         out.at[idx, "代碼"] = to_tw_code(symbol)
-        out.at[idx, "股名"] = clean_text(info.get("股名", symbol))
+        out.at[idx, "股名"] = get_display_name(symbol)
         out.at[idx, "目前價"] = display_str(info.get("目前價"))
 
         current_price = safe_float(info.get("目前價"))
@@ -785,7 +801,7 @@ def send_line(text: str) -> Tuple[bool, str]:
 
 
 def build_priority_alerts(top3_df: pd.DataFrame, weekly_summary: Dict[str, object]) -> str:
-    lines = [f"上帝視角 V10.3 推薦 {now_str()}"]
+    lines = [f"上帝視角 V10.4 推薦 {now_str()}"]
     if pd.DataFrame(top3_df).empty:
         lines.append("目前尚無推薦標的。")
         return "\n".join(lines)
@@ -821,9 +837,9 @@ def init_state():
 init_state()
 
 # =========================================================
-# Sidebar（只保留總資金）
+# Sidebar
 # =========================================================
-st.sidebar.title("📊 上帝視角 V10.3 設定")
+st.sidebar.title("📊 上帝視角 V10.4 設定")
 capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CAPITAL, step=10000)
 
 # =========================================================
@@ -832,8 +848,8 @@ capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CA
 st.markdown(
     """
     <div class="hero-card">
-        <div class="title-xl">🌙 上帝視角 V10.3 修正版</div>
-        <div class="muted">已修正 as_object_df 缺漏｜依總資金自動推薦三檔、開盤區間、張數、預估週收益</div>
+        <div class="title-xl">🌙 上帝視角 V10.4 中文股名 + 配色優化版</div>
+        <div class="muted">台股股名優先使用 TWSE 中文名稱｜深色面板配色重新優化｜依總資金自動推薦三檔與下單表</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -856,11 +872,11 @@ with i3:
 with st.container():
     st.markdown('<div class="top-btn">', unsafe_allow_html=True)
     if st.button("🚀 依總資金重新推薦本週標的", use_container_width=True):
-        run_auto_market_scan_v10_3(capital)
+        run_auto_market_scan_v10_4(capital)
     st.markdown("</div>", unsafe_allow_html=True)
 
 if st.session_state["top3_df"].empty:
-    run_auto_market_scan_v10_3(capital)
+    run_auto_market_scan_v10_4(capital)
 
 scan_df = as_object_df(st.session_state["scan_df"])
 top3_df = as_object_df(st.session_state["top3_df"])
@@ -896,8 +912,8 @@ with tab1:
                         <div class="muted">{clean_text(row.get("族群"))}｜{clean_text(row.get("等級"))}</div>
                         <div style="margin-top:10px;">
                             <span class="badge" style="background:{color};color:white;">信心 {clean_text(row.get("信心"))}</span>
-                            <span class="badge" style="background:#1e293b;color:#93c5fd;">{clean_text(row.get("訊號"))}</span>
-                            <span class="badge" style="background:#111827;color:#cbd5e1;">評分 {clean_text(row.get("評分"))}</span>
+                            <span class="badge" style="background:#16233a;color:#93c5fd;">{clean_text(row.get("訊號"))}</span>
+                            <span class="badge" style="background:#0f172a;color:#d7e3f0;">評分 {clean_text(row.get("評分"))}</span>
                         </div>
                         <div class="kpi">進場：{clean_text(row.get("建議進場價")) or "-"}</div>
                         <div>停損：{clean_text(row.get("停損價")) or "-"}</div>
@@ -927,7 +943,7 @@ with tab2:
         st.download_button(
             "⬇️ 下載下單表 CSV",
             order_df.to_csv(index=False).encode("utf-8-sig"),
-            "god_view_v10_3_orders.csv",
+            "god_view_v10_4_orders.csv",
             "text/csv"
         )
 
@@ -982,4 +998,4 @@ with tab4:
             st.error(msg)
 
 st.markdown("---")
-st.caption("上帝視角 V10.3 修正版｜已修正 as_object_df 缺漏問題")
+st.caption("上帝視角 V10.4｜中文股名顯示 + 介面配色優化版")

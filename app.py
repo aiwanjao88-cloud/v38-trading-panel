@@ -8,11 +8,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
 
-st.set_page_config(page_title="上帝視角 V8", page_icon="📈", layout="wide")
+st.set_page_config(page_title="上帝視角 V8.1", page_icon="📈", layout="wide")
 
-# =========================================================
-# 基本設定
-# =========================================================
 DEFAULT_CAPITAL = 200000
 DEFAULT_MAX_POSITIONS = 2
 DEFAULT_SINGLE_POSITION_PCT = 0.30
@@ -49,9 +46,6 @@ SECTOR_BUCKETS = {
 }
 
 
-# =========================================================
-# 工具函式
-# =========================================================
 def now_str() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -70,7 +64,6 @@ def parse_symbols(raw: str) -> List[str]:
         s = normalize_symbol(x)
         if s:
             items.append(s)
-
     seen = set()
     out = []
     for s in items:
@@ -155,9 +148,6 @@ def get_sector_for_symbol(symbol: str) -> str:
     return "其他"
 
 
-# =========================================================
-# TWSE 官方資料
-# =========================================================
 @st.cache_data(ttl=120)
 def fetch_twse_stock_day_all() -> pd.DataFrame:
     try:
@@ -245,9 +235,6 @@ def get_twse_bw_row(code: str) -> Optional[dict]:
     return match.iloc[0].to_dict()
 
 
-# =========================================================
-# yfinance 補資料
-# =========================================================
 @st.cache_data(ttl=180)
 def get_yf_info(symbol: str, market: str = "") -> Dict[str, object]:
     yf_symbol = to_yf_symbol(symbol, market)
@@ -285,9 +272,6 @@ def get_yf_info(symbol: str, market: str = "") -> Dict[str, object]:
     return result
 
 
-# =========================================================
-# 三大法人資料
-# =========================================================
 def _find_recent_trade_dates(days_back: int = 10) -> List[datetime]:
     today = datetime.now()
     return [today - timedelta(days=i) for i in range(days_back)]
@@ -380,9 +364,6 @@ def get_chip_row(symbol: str) -> Dict[str, object]:
     return result
 
 
-# =========================================================
-# 股票整合資料
-# =========================================================
 @st.cache_data(ttl=120)
 def get_stock_info(symbol: str, market: str = "") -> Dict[str, object]:
     symbol = normalize_symbol(symbol)
@@ -390,7 +371,6 @@ def get_stock_info(symbol: str, market: str = "") -> Dict[str, object]:
 
     if market == "台股":
         code = to_tw_code(symbol)
-
         twse_day = get_twse_day_row(code)
         twse_bw = get_twse_bw_row(code)
         yf_info = get_yf_info(code, "台股")
@@ -454,9 +434,6 @@ def get_stock_info(symbol: str, market: str = "") -> Dict[str, object]:
     }
 
 
-# =========================================================
-# 歷史技術資料
-# =========================================================
 def rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
     gain = delta.clip(lower=0)
@@ -503,8 +480,170 @@ def fetch_price_history(symbol: str, period: str = "6mo", market: str = "") -> p
 
 
 # =========================================================
-# 族群輪動
+# 這就是你缺掉的核心函式：calc_chip_health
 # =========================================================
+def calc_chip_health(symbol: str, market: str, stop_loss_pct: float, take_profit_pct: float) -> Dict[str, object]:
+    market = infer_market(symbol, market)
+    info = get_stock_info(symbol, market)
+    df = fetch_price_history(symbol, period="6mo", market=market)
+
+    if df.empty or len(df) < 65:
+        return {
+            "市場": market,
+            "代碼": to_tw_code(symbol) if market == "台股" else normalize_symbol(symbol),
+            "股名": clean_text(info.get("股名", symbol)),
+            "外資": display_str(info.get("外資買賣超")),
+            "投信": display_str(info.get("投信買賣超")),
+            "自營商": display_str(info.get("自營商買賣超")),
+            "主力代理": "",
+            "量價": "",
+            "均線": "",
+            "RSI": "",
+            "綜合評分": -999,
+            "等級": "資料不足",
+            "建議": "資料不足",
+            "目前價": display_str(info.get("目前價")),
+            "停損價": "",
+            "第一停利價": "",
+            "異常事件": "資料不足",
+            "本益比": display_str(info.get("本益比")),
+            "殖利率%": display_str(info.get("殖利率%")),
+            "股價淨值比": display_str(info.get("股價淨值比")),
+            "籌碼資料日": clean_text(info.get("籌碼資料日", "")),
+            "流動性加分": 0,
+            "事件加分": 0,
+            "均線分數": 0,
+        }
+
+    last = df.iloc[-1]
+    close = safe_float(last.get("Close"))
+    ma5 = safe_float(last.get("MA5"))
+    ma20 = safe_float(last.get("MA20"))
+    ma60 = safe_float(last.get("MA60"))
+    rsi14 = safe_float(last.get("RSI14"))
+    vol_ratio = safe_float(last.get("VolumeRatio"))
+    ret1d = safe_float(last.get("Ret1D%"))
+    ret5d = safe_float(last.get("Ret5D%"))
+    prev20h = safe_float(last.get("Prev20High"))
+    prev20l = safe_float(last.get("Prev20Low"))
+
+    foreign = safe_float(info.get("外資買賣超"))
+    trust = safe_float(info.get("投信買賣超"))
+    dealer = safe_float(info.get("自營商買賣超"))
+
+    foreign_score = 15 if foreign and foreign > 0 else (-10 if foreign and foreign < 0 else 0)
+    trust_score = 15 if trust and trust > 0 else (-10 if trust and trust < 0 else 0)
+    dealer_score = 10 if dealer and dealer > 0 else (-5 if dealer and dealer < 0 else 0)
+
+    chip_total = 0
+    for v in [foreign, trust, dealer]:
+        if v:
+            chip_total += v
+
+    major_proxy_score = 20 if chip_total > 0 else (-15 if chip_total < 0 else 0)
+
+    ma_score = 0
+    if close and ma5 and ma20 and ma60:
+        if close > ma5 > ma20 > ma60:
+            ma_score = 30
+        elif close > ma5 > ma60:
+            ma_score = 20
+        elif close < ma60:
+            ma_score = -20
+
+    rsi_score = 0
+    if rsi14 is not None:
+        if 55 <= rsi14 <= 75:
+            rsi_score = 15
+        elif rsi14 < 40:
+            rsi_score = -10
+        elif rsi14 > 80:
+            rsi_score = -5
+
+    volume_price_score = 0
+    anomaly_tags = []
+    event_bonus = 0
+
+    if vol_ratio and vol_ratio >= 1.8:
+        volume_price_score += 15
+        event_bonus += 8
+        anomaly_tags.append("放量")
+
+    if close and prev20h and close > prev20h:
+        volume_price_score += 15
+        event_bonus += 10
+        anomaly_tags.append("突破")
+
+    if close and prev20l and close < prev20l:
+        volume_price_score -= 15
+        anomaly_tags.append("跌破")
+
+    if ret1d and ret1d >= 4:
+        event_bonus += 5
+        anomaly_tags.append("急拉")
+
+    if ret1d and ret1d <= -4:
+        anomaly_tags.append("急殺")
+
+    liquidity_bonus = 0
+    if vol_ratio and vol_ratio >= 1.2:
+        liquidity_bonus += 5
+    if ret5d and ret5d > 0:
+        liquidity_bonus += 5
+
+    score = foreign_score + trust_score + dealer_score + major_proxy_score + ma_score + rsi_score + volume_price_score + liquidity_bonus + event_bonus
+
+    if score >= 60:
+        grade = "強勢"
+        advice = "偏多續抱 / 可列入首選"
+    elif score >= 30:
+        grade = "觀察"
+        advice = "續追蹤 / 等待更佳進場"
+    else:
+        grade = "危險"
+        advice = "保守 / 嚴設停損"
+
+    stop_price = round(close * (1 - stop_loss_pct), 2) if close else None
+    tp1 = round(close * (1 + take_profit_pct), 2) if close else None
+
+    return {
+        "市場": market,
+        "代碼": to_tw_code(symbol) if market == "台股" else normalize_symbol(symbol),
+        "股名": clean_text(info.get("股名", symbol)),
+        "外資": display_str(foreign),
+        "投信": display_str(trust),
+        "自營商": display_str(dealer),
+        "主力代理": str(major_proxy_score),
+        "量價": str(volume_price_score),
+        "均線": str(ma_score),
+        "RSI": display_str(rsi14),
+        "綜合評分": int(score),
+        "等級": grade,
+        "建議": advice,
+        "目前價": display_str(close or info.get("目前價")),
+        "停損價": display_str(stop_price),
+        "第一停利價": display_str(tp1),
+        "異常事件": " / ".join(anomaly_tags) if anomaly_tags else "",
+        "本益比": display_str(info.get("本益比")),
+        "殖利率%": display_str(info.get("殖利率%")),
+        "股價淨值比": display_str(info.get("股價淨值比")),
+        "籌碼資料日": clean_text(info.get("籌碼資料日", "")),
+        "流動性加分": liquidity_bonus,
+        "事件加分": event_bonus,
+        "均線分數": ma_score,
+    }
+
+
+def build_chip_health_df(symbols: List[str], market_hint: str, stop_loss_pct: float, take_profit_pct: float) -> pd.DataFrame:
+    rows = []
+    for s in symbols:
+        rows.append(calc_chip_health(s, market_hint, stop_loss_pct, take_profit_pct))
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    return as_object_df(df.sort_values(["綜合評分"], ascending=False).reset_index(drop=True))
+
+
 def build_sector_rotation_df(scan_df: pd.DataFrame) -> pd.DataFrame:
     df = pd.DataFrame(scan_df).copy()
     if df.empty:
@@ -538,9 +677,6 @@ def get_sector_strength_map(scan_df: pd.DataFrame) -> Dict[str, float]:
     return strength
 
 
-# =========================================================
-# 搜尋健檢
-# =========================================================
 def build_search_df(symbols: List[str], market_hint: str, stop_loss_pct: float, take_profit_pct: float) -> pd.DataFrame:
     rows = []
     for s in symbols:
@@ -550,9 +686,6 @@ def build_search_df(symbols: List[str], market_hint: str, stop_loss_pct: float, 
     return as_object_df(pd.DataFrame(rows).sort_values(["綜合評分"], ascending=False).reset_index(drop=True))
 
 
-# =========================================================
-# V8 主動推薦
-# =========================================================
 def build_dynamic_tw_scan_pool(top_n_value: int = 100, top_n_volume: int = 80) -> List[str]:
     df = fetch_twse_stock_day_all()
     pool = []
@@ -670,9 +803,7 @@ def make_order_df(top_df: pd.DataFrame, capital: float, alloc_pct: float, market
     for idx, (_, row) in enumerate(pd.DataFrame(top_df).iterrows(), start=1):
         market = infer_market(row.get("代碼", ""), row.get("市場", ""))
         entry_price = safe_float(row.get("建議進場價"))
-        rr = safe_float(row.get("風險報酬比"))
 
-        # 倉位建議
         pos_pct = alloc_pct
         mode = "標準"
 
@@ -727,7 +858,6 @@ def run_auto_market_scan_v8(stop_loss_pct: float, take_profit_pct: float, capita
     raw_results = []
     df_map = {}
 
-    # 第一輪：基礎掃描
     for symbol in candidate_pool:
         health = calc_chip_health(symbol, "台股", stop_loss_pct, take_profit_pct)
 
@@ -759,7 +889,6 @@ def run_auto_market_scan_v8(stop_loss_pct: float, take_profit_pct: float, capita
         st.session_state["sector_df"] = pd.DataFrame()
         return
 
-    # 第二輪：族群強度
     sector_df = build_sector_rotation_df(scan_df)
     strength_map = get_sector_strength_map(scan_df)
     scan_df["族群強度加分"] = scan_df["族群"].apply(lambda x: round((strength_map.get(x, 0) - 30) / 5, 2) if strength_map.get(x, 0) else 0)
@@ -801,9 +930,6 @@ def run_auto_market_scan_v8(stop_loss_pct: float, take_profit_pct: float, capita
     st.session_state["sector_df"] = as_object_df(sector_df)
 
 
-# =========================================================
-# 持倉
-# =========================================================
 def ensure_position_columns(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(df).copy()
     for col in POSITION_COLUMNS:
@@ -899,9 +1025,6 @@ def build_position_scan_df(pos_df: pd.DataFrame, stop_loss_pct: float, take_prof
     return as_object_df(pd.DataFrame(rows).sort_values(["評分"], ascending=False).reset_index(drop=True))
 
 
-# =========================================================
-# 日報
-# =========================================================
 def build_daily_report_df(positions_df: pd.DataFrame, search_symbols: List[str], stop_loss_pct: float, take_profit_pct: float) -> pd.DataFrame:
     rows = []
 
@@ -947,9 +1070,6 @@ def build_daily_report_df(positions_df: pd.DataFrame, search_symbols: List[str],
     return as_object_df(df)
 
 
-# =========================================================
-# LINE
-# =========================================================
 def line_enabled() -> bool:
     return "line_channel_access_token" in st.secrets and "line_to" in st.secrets
 
@@ -978,7 +1098,7 @@ def send_line(text: str) -> Tuple[bool, str]:
 
 
 def build_priority_alerts(scan_df: pd.DataFrame, position_scan_df: pd.DataFrame) -> str:
-    lines = [f"上帝視角 V8 高優先級提醒 {now_str()}"]
+    lines = [f"上帝視角 V8.1 高優先級提醒 {now_str()}"]
     added = 0
 
     if not pd.DataFrame(scan_df).empty:
@@ -1004,9 +1124,6 @@ def build_priority_alerts(scan_df: pd.DataFrame, position_scan_df: pd.DataFrame)
     return "\n".join(lines)
 
 
-# =========================================================
-# 圖表 / 刷新
-# =========================================================
 def draw_chart_no_plotly(df: pd.DataFrame, symbol: str):
     if df.empty:
         st.warning(f"{symbol} 無資料")
@@ -1042,9 +1159,6 @@ def auto_refresh_script(seconds: int):
     )
 
 
-# =========================================================
-# Session state
-# =========================================================
 def init_state():
     st.session_state.setdefault("scan_df", pd.DataFrame())
     st.session_state.setdefault("top3_df", pd.DataFrame())
@@ -1108,10 +1222,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# =========================================================
-# Sidebar
-# =========================================================
-st.sidebar.title("📱 上帝視角 V8 設定")
+st.sidebar.title("📱 上帝視角 V8.1 設定")
 capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CAPITAL, step=10000)
 max_positions = st.sidebar.slider("同時持倉上限", 1, 5, DEFAULT_MAX_POSITIONS)
 single_position_pct = st.sidebar.slider("單檔上限 %", 10, 50, int(DEFAULT_SINGLE_POSITION_PCT * 100), step=5) / 100
@@ -1128,11 +1239,8 @@ refresh_seconds = st.sidebar.slider("刷新秒數", 10, 300, st.session_state["r
 st.session_state["auto_refresh"] = auto_refresh
 st.session_state["refresh_seconds"] = refresh_seconds
 
-# =========================================================
-# Header
-# =========================================================
-st.title("📈 上帝視角 V8 三階升級版")
-st.caption("族群輪動 + 排序強化 + 實戰下單表")
+st.title("📈 上帝視角 V8.1 穩定修正版")
+st.caption("已補齊 calc_chip_health / 完整可覆蓋版")
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("總資金", f"{capital:,.0f}")
@@ -1148,7 +1256,7 @@ with i2:
 with i3:
     st.info(f"盤面狀態：{st.session_state.get('market_state', '資料不足')}")
 
-if st.button("🔍 啟動 V8 市場掃描", type="primary", use_container_width=True):
+if st.button("🔍 啟動 V8.1 市場掃描", type="primary", use_container_width=True):
     run_auto_market_scan_v8(stop_loss_pct, take_profit_pct, capital, single_position_pct)
 
 if st.session_state["scan_df"].empty:
@@ -1168,9 +1276,6 @@ order_df = as_object_df(st.session_state["order_df"])
 sector_df = as_object_df(st.session_state.get("sector_df", pd.DataFrame()))
 df_map = st.session_state["df_map"]
 
-# =========================================================
-# Tabs
-# =========================================================
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🎯 主動推薦三檔",
     "🔎 搜尋健檢",
@@ -1181,7 +1286,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 ])
 
 with tab1:
-    st.subheader("明日 / 盤中最強三檔（V8）")
+    st.subheader("明日 / 盤中最強三檔（V8.1）")
 
     if not sector_df.empty:
         st.markdown("**族群輪動排行**")
@@ -1233,7 +1338,7 @@ with tab2:
             st.info("左側輸入美股搜尋代碼後會顯示。")
 
 with tab3:
-    st.subheader("國泰手動下單表（V8 實戰版）")
+    st.subheader("國泰手動下單表")
     if order_df.empty:
         st.info("尚無下單表，請先啟動市場掃描。")
     else:
@@ -1331,12 +1436,5 @@ with tab6:
     with a2:
         st.info("已設定 LINE secrets" if line_enabled() else "尚未設定 LINE secrets")
 
-    st.markdown("**這次三次優化內容**")
-    st.markdown(
-        "- 族群輪動\n"
-        "- 排序引擎強化\n"
-        "- 實戰下單表升級"
-    )
-
 st.markdown("---")
-st.caption("上帝視角 V8 三階升級版：完整可覆蓋代碼。")
+st.caption("上帝視角 V8.1 穩定修正版：已修正 calc_chip_health 缺漏錯誤。")

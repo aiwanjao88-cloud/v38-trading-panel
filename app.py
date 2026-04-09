@@ -6,7 +6,7 @@ import requests
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="上帝視角 V10.4", page_icon="📈", layout="wide")
+st.set_page_config(page_title="上帝視角 V10.5", page_icon="📈", layout="wide")
 
 # =========================================================
 # 固定參數
@@ -139,7 +139,7 @@ def get_confidence_color(score: Optional[float]) -> str:
 
 
 # =========================================================
-# 介面配色優化
+# 深色中文專業介面
 # =========================================================
 st.markdown(
     """
@@ -212,7 +212,7 @@ st.markdown(
         border: 1px solid rgba(125,211,252,.10);
         border-radius: 22px;
         padding: 18px;
-        min-height: 320px;
+        min-height: 360px;
         box-shadow: 0 14px 26px rgba(2,6,23,.32);
     }
 
@@ -415,6 +415,7 @@ def calc_score(symbol: str, stop_loss_pct: float, take_profit_pct: float) -> Dic
             "異常事件": "",
             "族群": get_sector_for_symbol(symbol),
             "RSI": "",
+            "開盤策略": "暫不處理",
         }
 
     last = df.iloc[-1]
@@ -469,12 +470,15 @@ def calc_score(symbol: str, stop_loss_pct: float, take_profit_pct: float) -> Dic
     if score >= 60:
         level = "強勢"
         signal = "候選進攻"
+        action = "可考慮開新倉"
     elif score >= 30:
         level = "觀察"
         signal = "續追蹤"
+        action = "等開盤站穩再進"
     else:
         level = "保守"
         signal = "不追價"
+        action = "暫不建議開新倉"
 
     entry = round(close, 2) if close else None
     stop = round(close * (1 - stop_loss_pct), 2) if close else None
@@ -504,6 +508,7 @@ def calc_score(symbol: str, stop_loss_pct: float, take_profit_pct: float) -> Dic
         "理由": " / ".join(anomaly) if anomaly else "趨勢正常",
         "異常事件": " / ".join(anomaly),
         "RSI": display_str(rsi14),
+        "開盤策略": action,
     }
 
 
@@ -582,6 +587,19 @@ def build_market_state(scan_df: pd.DataFrame) -> str:
     return "弱勢盤"
 
 
+def build_opening_verdict(market_state: str, top3_df: pd.DataFrame) -> Tuple[str, str]:
+    if pd.DataFrame(top3_df).empty:
+        return "資料不足", "目前無足夠標的，不建議開新倉"
+
+    strong_count = (pd.to_numeric(top3_df["評分"], errors="coerce") >= 60).sum()
+
+    if market_state == "強勢盤" and strong_count >= 2:
+        return "偏多可開新倉", "可依推薦標的分批進場，仍需嚴守停損"
+    if market_state == "震盪盤":
+        return "震盪小倉操作", "僅小倉位測試，開盤不追高"
+    return "保守觀望", "先等盤中確認量價再決定是否進場"
+
+
 def recommend_qty(capital: float, weight: float, entry: Optional[float]) -> Tuple[float, int]:
     budget = capital * weight
     entry = safe_float(entry)
@@ -622,6 +640,7 @@ def build_order_df(top_df: pd.DataFrame, capital: float, market_state: str) -> p
             "建議資金": round(budget, 0),
             "建議張數": qty,
             "預估單筆收益": single_profit,
+            "開盤策略": clean_text(row.get("開盤策略")),
         })
 
     return as_object_df(pd.DataFrame(rows))
@@ -646,7 +665,7 @@ def build_weekly_summary(order_df: pd.DataFrame, capital: float) -> Dict[str, ob
     }
 
 
-def run_auto_market_scan_v10_4(capital: float):
+def run_auto_market_scan_v10_5(capital: float):
     candidate_pool = build_dynamic_tw_scan_pool()
     results = []
 
@@ -665,6 +684,8 @@ def run_auto_market_scan_v10_4(capital: float):
         st.session_state["weekly_summary"] = {}
         st.session_state["market_state"] = "資料不足"
         st.session_state["sector_df"] = pd.DataFrame()
+        st.session_state["verdict_title"] = "資料不足"
+        st.session_state["verdict_text"] = "目前無法判斷"
         return
 
     sector_df = build_sector_rotation_df(scan_df)
@@ -683,6 +704,7 @@ def run_auto_market_scan_v10_4(capital: float):
 
     order_df = build_order_df(top3_df, capital, market_state)
     weekly_summary = build_weekly_summary(order_df, capital)
+    verdict_title, verdict_text = build_opening_verdict(market_state, top3_df)
 
     st.session_state["scan_df"] = as_object_df(scan_df)
     st.session_state["top3_df"] = as_object_df(top3_df)
@@ -690,6 +712,8 @@ def run_auto_market_scan_v10_4(capital: float):
     st.session_state["weekly_summary"] = weekly_summary
     st.session_state["market_state"] = market_state
     st.session_state["sector_df"] = as_object_df(sector_df)
+    st.session_state["verdict_title"] = verdict_title
+    st.session_state["verdict_text"] = verdict_text
 
 
 # =========================================================
@@ -800,8 +824,10 @@ def send_line(text: str) -> Tuple[bool, str]:
         return False, f"推播失敗：{e}"
 
 
-def build_priority_alerts(top3_df: pd.DataFrame, weekly_summary: Dict[str, object]) -> str:
-    lines = [f"上帝視角 V10.4 推薦 {now_str()}"]
+def build_priority_alerts(top3_df: pd.DataFrame, weekly_summary: Dict[str, object], verdict_title: str) -> str:
+    lines = [f"上帝視角 V10.5 推薦 {now_str()}"]
+    lines.append(f"今日判斷：{verdict_title}")
+
     if pd.DataFrame(top3_df).empty:
         lines.append("目前尚無推薦標的。")
         return "\n".join(lines)
@@ -832,6 +858,8 @@ def init_state():
     st.session_state.setdefault("position_scan_df", pd.DataFrame())
     st.session_state.setdefault("market_state", "資料不足")
     st.session_state.setdefault("sector_df", pd.DataFrame())
+    st.session_state.setdefault("verdict_title", "資料不足")
+    st.session_state.setdefault("verdict_text", "目前無法判斷")
 
 
 init_state()
@@ -839,7 +867,7 @@ init_state()
 # =========================================================
 # Sidebar
 # =========================================================
-st.sidebar.title("📊 上帝視角 V10.4 設定")
+st.sidebar.title("📊 上帝視角 V10.5 設定")
 capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CAPITAL, step=10000)
 
 # =========================================================
@@ -848,8 +876,8 @@ capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CA
 st.markdown(
     """
     <div class="hero-card">
-        <div class="title-xl">🌙 上帝視角 V10.4 中文股名 + 配色優化版</div>
-        <div class="muted">台股股名優先使用 TWSE 中文名稱｜深色面板配色重新優化｜依總資金自動推薦三檔與下單表</div>
+        <div class="title-xl">🌙 上帝視角 V10.5 台股實戰中文專業版</div>
+        <div class="muted">台股顯示 TWSE 中文名稱｜配色再優化｜加入今日是否適合開新倉判斷</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -861,28 +889,32 @@ m2.metric("固定停損", f"{int(FIXED_STOP_LOSS_PCT * 100)}%")
 m3.metric("第一停利", f"{int(FIXED_TAKE_PROFIT_PCT * 100)}%")
 m4.metric("推薦檔數", f"{FIXED_MAX_RECOMMEND} 檔")
 
+if st.session_state["top3_df"].empty:
+    run_auto_market_scan_v10_5(capital)
+
 i1, i2, i3 = st.columns(3)
 with i1:
     st.markdown(f'<div class="soft-box"><b>最後刷新時間</b><br>{now_str()}</div>', unsafe_allow_html=True)
 with i2:
-    st.markdown('<div class="soft-box"><b>模式</b><br>開盤進出場試算</div>', unsafe_allow_html=True)
-with i3:
     st.markdown(f'<div class="soft-box"><b>盤面狀態</b><br>{st.session_state.get("market_state", "資料不足")}</div>', unsafe_allow_html=True)
+with i3:
+    st.markdown(
+        f'<div class="soft-box"><b>今日判斷</b><br>{st.session_state.get("verdict_title", "資料不足")}<br><span style="color:#9fb0c5;">{st.session_state.get("verdict_text", "")}</span></div>',
+        unsafe_allow_html=True,
+    )
 
 with st.container():
     st.markdown('<div class="top-btn">', unsafe_allow_html=True)
     if st.button("🚀 依總資金重新推薦本週標的", use_container_width=True):
-        run_auto_market_scan_v10_4(capital)
+        run_auto_market_scan_v10_5(capital)
     st.markdown("</div>", unsafe_allow_html=True)
-
-if st.session_state["top3_df"].empty:
-    run_auto_market_scan_v10_4(capital)
 
 scan_df = as_object_df(st.session_state["scan_df"])
 top3_df = as_object_df(st.session_state["top3_df"])
 order_df = as_object_df(st.session_state["order_df"])
 sector_df = as_object_df(st.session_state["sector_df"])
 weekly_summary = st.session_state["weekly_summary"]
+verdict_title = st.session_state["verdict_title"]
 
 tab1, tab2, tab3, tab4 = st.tabs([
     "🎯 本週推薦三檔",
@@ -915,10 +947,11 @@ with tab1:
                             <span class="badge" style="background:#16233a;color:#93c5fd;">{clean_text(row.get("訊號"))}</span>
                             <span class="badge" style="background:#0f172a;color:#d7e3f0;">評分 {clean_text(row.get("評分"))}</span>
                         </div>
-                        <div class="kpi">進場：{clean_text(row.get("建議進場價")) or "-"}</div>
+                        <div class="kpi">建議進場：{clean_text(row.get("建議進場價")) or "-"}</div>
                         <div>停損：{clean_text(row.get("停損價")) or "-"}</div>
                         <div>停利：{clean_text(row.get("第一停利價")) or "-"}</div>
                         <div>風報比：{clean_text(row.get("風險報酬比")) or "-"}</div>
+                        <div style="margin-top:8px;">開盤策略：{clean_text(row.get("開盤策略"))}</div>
                         <div style="margin-top:8px;">理由：{clean_text(row.get("理由"))}</div>
                     </div>
                     """,
@@ -943,7 +976,7 @@ with tab2:
         st.download_button(
             "⬇️ 下載下單表 CSV",
             order_df.to_csv(index=False).encode("utf-8-sig"),
-            "god_view_v10_4_orders.csv",
+            "god_view_v10_5_orders.csv",
             "text/csv"
         )
 
@@ -987,7 +1020,7 @@ with tab3:
 
 with tab4:
     st.subheader("LINE 推播")
-    line_text = build_priority_alerts(top3_df, weekly_summary)
+    line_text = build_priority_alerts(top3_df, weekly_summary, verdict_title)
     st.code(line_text)
 
     if st.button("📲 發送本週推薦到 LINE", use_container_width=True):
@@ -998,4 +1031,4 @@ with tab4:
             st.error(msg)
 
 st.markdown("---")
-st.caption("上帝視角 V10.4｜中文股名顯示 + 介面配色優化版")
+st.caption("上帝視角 V10.5｜台股中文股名 + 介面配色優化 + 開新倉判斷版")

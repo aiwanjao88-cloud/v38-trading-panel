@@ -80,11 +80,18 @@ def to_yf_symbol(symbol: str, market: str = "") -> str:
 
 def safe_float(x):
     try:
-        if x in [None, "", "-", "--"]:
+        if x in [None, "", "-", "--", "None", "nan"]:
             return None
         return float(str(x).replace(",", ""))
     except Exception:
         return None
+
+
+def display_value(x, digits: int = 2):
+    val = safe_float(x)
+    if val is None:
+        return ""
+    return round(val, digits)
 
 
 # =========================
@@ -401,10 +408,10 @@ def enrich_positions_auto(df: pd.DataFrame) -> pd.DataFrame:
 
         out.at[idx, "代碼"] = to_tw_code(symbol) if (market == "台股" or is_tw_stock(symbol)) else symbol
         out.at[idx, "股名"] = info.get("股名", symbol)
-        out.at[idx, "目前價"] = info.get("目前價", None)
-        out.at[idx, "本益比"] = info.get("本益比", None)
-        out.at[idx, "殖利率%"] = info.get("殖利率%", None)
-        out.at[idx, "股價淨值比"] = info.get("股價淨值比", None)
+        out.at[idx, "目前價"] = display_value(info.get("目前價"))
+        out.at[idx, "本益比"] = display_value(info.get("本益比"))
+        out.at[idx, "殖利率%"] = display_value(info.get("殖利率%"))
+        out.at[idx, "股價淨值比"] = display_value(info.get("股價淨值比"))
 
         current_price = safe_float(info.get("目前價"))
         cost = safe_float(row.get("成本價"))
@@ -413,6 +420,8 @@ def enrich_positions_auto(df: pd.DataFrame) -> pd.DataFrame:
 
         if current_price is not None and cost and cost > 0:
             out.at[idx, "報酬率%"] = round(((current_price / cost) - 1) * 100, 2)
+        else:
+            out.at[idx, "報酬率%"] = ""
 
         status = "持有中"
         if current_price is None:
@@ -441,16 +450,20 @@ def build_position_scan_df(pos_df: pd.DataFrame, period: str, stop_loss_pct: flo
 
         df = fetch_price_history(symbol, period=period, market=market)
         sig = calc_signal(df, stop_loss_pct, take_profit_pct)
+        close_val = sig["close"]
+        if close_val is None:
+            info = get_stock_info(symbol, market)
+            close_val = info.get("目前價")
 
         rows.append({
             "市場": market,
             "代碼": symbol,
             "股名": row.get("股名", symbol),
-            "收盤": sig["close"],
+            "收盤": display_value(close_val),
             "訊號": sig["signal"],
-            "建議進場價": sig["entry"],
-            "停損價": sig["stop"],
-            "第一停利價": sig["tp1"],
+            "建議進場價": display_value(sig["entry"]),
+            "停損價": display_value(sig["stop"]),
+            "第一停利價": display_value(sig["tp1"]),
             "評分": sig["score"],
             "理由": sig["reason"],
         })
@@ -479,7 +492,7 @@ def recommend_qty(capital: float, alloc_pct: float, entry: Optional[float], mark
 def make_order_df(top_df: pd.DataFrame, capital: float, alloc_pct: float) -> pd.DataFrame:
     rows = []
     for _, row in top_df.iterrows():
-        budget, qty = recommend_qty(capital, alloc_pct, row["建議進場價"], row["市場"])
+        budget, qty = recommend_qty(capital, alloc_pct, safe_float(row["建議進場價"]), row["市場"])
         rows.append({
             "市場": row["市場"],
             "代碼": row["代碼"],
@@ -495,55 +508,58 @@ def make_order_df(top_df: pd.DataFrame, capital: float, alloc_pct: float) -> pd.
     return pd.DataFrame(rows)
 
 
+def build_scan_row(symbol: str, market: str, period: str, stop_loss_pct: float, take_profit_pct: float) -> Optional[Dict[str, object]]:
+    info = get_stock_info(symbol, market)
+    df = fetch_price_history(symbol, period=period, market=market)
+    sig = calc_signal(df, stop_loss_pct, take_profit_pct)
+
+    close_val = sig["close"] if sig["close"] is not None else info.get("目前價")
+    entry_val = sig["entry"]
+    stop_val = sig["stop"]
+    tp1_val = sig["tp1"]
+
+    if close_val is not None:
+        if entry_val is None and sig["signal"] != "資料不足":
+            entry_val = round(float(close_val), 2)
+        if stop_val is None and sig["signal"] != "資料不足":
+            stop_val = round(float(close_val) * (1 - stop_loss_pct), 2)
+        if tp1_val is None and sig["signal"] != "資料不足":
+            tp1_val = round(float(close_val) * (1 + take_profit_pct), 2)
+
+    return {
+        "市場": market,
+        "代碼": to_tw_code(symbol) if market == "台股" else normalize_symbol(symbol),
+        "股名": info.get("股名", symbol),
+        "收盤": display_value(close_val),
+        "訊號": sig["signal"],
+        "建議進場價": display_value(entry_val),
+        "停損價": display_value(stop_val),
+        "第一停利價": display_value(tp1_val),
+        "評分": sig["score"],
+        "理由": sig["reason"],
+        "本益比": display_value(info.get("本益比")),
+        "殖利率%": display_value(info.get("殖利率%")),
+        "股價淨值比": display_value(info.get("股價淨值比")),
+    }
+
+
 def run_scan(symbols_tw: List[str], symbols_us: List[str], period: str, stop_loss_pct: float, take_profit_pct: float, capital: float, alloc_pct: float):
     results = []
     df_map = {}
 
     for symbol in symbols_tw:
         code = to_tw_code(symbol)
-        info = get_tw_stock_info(code)
-        df = fetch_price_history(code, period=period, market="台股")
-        df_map[code] = df
-        if not df.empty:
-            sig = calc_signal(df, stop_loss_pct, take_profit_pct)
-            results.append({
-                "市場": "台股",
-                "代碼": code,
-                "股名": info.get("股名", code),
-                "收盤": sig["close"],
-                "訊號": sig["signal"],
-                "建議進場價": sig["entry"],
-                "停損價": sig["stop"],
-                "第一停利價": sig["tp1"],
-                "評分": sig["score"],
-                "理由": sig["reason"],
-                "本益比": info.get("本益比"),
-                "殖利率%": info.get("殖利率%"),
-                "股價淨值比": info.get("股價淨值比"),
-            })
+        row = build_scan_row(code, "台股", period, stop_loss_pct, take_profit_pct)
+        if row:
+            results.append(row)
+            df_map[code] = fetch_price_history(code, period=period, market="台股")
 
     for symbol in symbols_us:
         s = normalize_symbol(symbol)
-        info = get_us_stock_info(s)
-        df = fetch_price_history(s, period=period, market="美股")
-        df_map[s] = df
-        if not df.empty:
-            sig = calc_signal(df, stop_loss_pct, take_profit_pct)
-            results.append({
-                "市場": "美股",
-                "代碼": s,
-                "股名": info.get("股名", s),
-                "收盤": sig["close"],
-                "訊號": sig["signal"],
-                "建議進場價": sig["entry"],
-                "停損價": sig["stop"],
-                "第一停利價": sig["tp1"],
-                "評分": sig["score"],
-                "理由": sig["reason"],
-                "本益比": info.get("本益比"),
-                "殖利率%": info.get("殖利率%"),
-                "股價淨值比": info.get("股價淨值比"),
-            })
+        row = build_scan_row(s, "美股", period, stop_loss_pct, take_profit_pct)
+        if row:
+            results.append(row)
+            df_map[s] = fetch_price_history(s, period=period, market="美股")
 
     scan_df = pd.DataFrame(results)
     if not scan_df.empty:
@@ -620,10 +636,10 @@ def draw_chart_no_plotly(df: pd.DataFrame, symbol: str):
 
     latest = df.iloc[-1]
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("收盤", f"{safe_float(latest.get('Close')):.2f}" if safe_float(latest.get("Close")) is not None else "-")
-    c2.metric("MA5", f"{safe_float(latest.get('MA5')):.2f}" if safe_float(latest.get("MA5")) is not None else "-")
-    c3.metric("MA60", f"{safe_float(latest.get('MA60')):.2f}" if safe_float(latest.get("MA60")) is not None else "-")
-    c4.metric("RSI14", f"{safe_float(latest.get('RSI14')):.2f}" if safe_float(latest.get("RSI14")) is not None else "-")
+    c1.metric("收盤", display_value(latest.get("Close")))
+    c2.metric("MA5", display_value(latest.get("MA5")))
+    c3.metric("MA60", display_value(latest.get("MA60")))
+    c4.metric("RSI14", display_value(latest.get("RSI14")))
 
 
 def auto_refresh_script(seconds: int):
@@ -725,7 +741,7 @@ st.session_state["refresh_seconds"] = refresh_seconds
 # =========================
 # Header
 # =========================
-st.title("📈 上帝視角 TWSE Pro")
+st.title("📈 上帝視角 TWSE Pro 修正版")
 st.caption("可實戰三檔 / 國泰下單表 / 持倉追蹤 / 即時掃描 / LINE 推播")
 
 m1, m2, m3, m4 = st.columns(4)
@@ -777,9 +793,9 @@ with tab1:
             with cards[i]:
                 st.markdown(f"**{row['代碼']}**")
                 st.caption(f"{row['股名']}｜{row['市場']}｜{row['訊號']}")
-                st.write(f"進場：{row['建議進場價']}")
-                st.write(f"停損：{row['停損價']}")
-                st.write(f"停利：{row['第一停利價']}")
+                st.write(f"進場：{row['建議進場價'] if row['建議進場價'] != '' else '-'}")
+                st.write(f"停損：{row['停損價'] if row['停損價'] != '' else '-'}")
+                st.write(f"停利：{row['第一停利價'] if row['第一停利價'] != '' else '-'}")
 
         st.subheader("完整排行")
         st.dataframe(scan_df, use_container_width=True, hide_index=True)
@@ -895,15 +911,15 @@ with tab5:
     with a2:
         st.info("已設定 LINE secrets" if line_enabled() else "尚未設定 LINE secrets")
 
-    st.markdown("**TWSE Pro 功能**")
+    st.markdown("**TWSE Pro 修正版功能**")
     st.markdown(
-        "- 可實戰三檔\n"
-        "- 國泰手動下單表\n"
-        "- 持倉追蹤 + 即時掃描\n"
-        "- 台股 TWSE 官方資料\n"
-        "- 美股 yfinance\n"
-        "- LINE 推播"
+        "- 修正收盤顯示 None\n"
+        "- 修正進場/停損/停利空值\n"
+        "- 股名優先取 TWSE\n"
+        "- 台股以 TWSE 官方資料為主\n"
+        "- 美股維持 yfinance\n"
+        "- 保留可實戰三檔、下單表、持倉、LINE"
     )
 
 st.markdown("---")
-st.caption("上帝視角 TWSE Pro：研究與決策輔助用途，不保證獲利。")
+st.caption("上帝視角 TWSE Pro 修正版：研究與決策輔助用途，不保證獲利。")

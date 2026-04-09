@@ -8,7 +8,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
 
-st.set_page_config(page_title="上帝視角", page_icon="📈", layout="wide")
+st.set_page_config(page_title="上帝視角 V4", page_icon="📈", layout="wide")
 
 # =========================================================
 # 基本設定
@@ -31,15 +31,15 @@ POSITION_COLUMNS = [
 
 TRADE_LOG_COLUMNS = ["日期", "市場", "代碼", "動作", "價格", "數量", "備註"]
 
-# 主動掃描池：台股市場推薦池
-AUTO_TW_SCAN_POOL = [
-    "2330", "2317", "2454", "2382", "2308", "2881", "2882", "2891",
-    "2603", "2609", "1301", "1303", "2412", "3037", "3661", "3231",
-    "3443", "3711", "5871", "2886", "2884", "2002", "2207", "2345",
-    "2376", "2357", "2408", "2383", "3034", "4938", "3017", "2379",
-    "2327", "3035", "6526", "6669", "0050", "0056", "00878", "00919",
-    "00929", "00940", "00713"
+# 核心觀察池：一定納入市場掃描
+CORE_TW_POOL = [
+    "2330", "2317", "2454", "2382", "2308", "2412", "3231", "3037",
+    "3443", "3661", "3017", "2379", "3034", "2408", "2357", "2383",
+    "2881", "2882", "2886", "2884", "2891", "5871",
+    "2603", "2609", "1301", "1303", "2002", "2207",
+    "0050", "0056", "00713", "00878", "00919", "00929", "00940"
 ]
+
 
 # =========================================================
 # 工具函式
@@ -634,8 +634,55 @@ def build_chip_health_df(symbols: List[str], market_hint: str, stop_loss_pct: fl
 
 
 # =========================================================
-# 推薦掃描
+# V4 動態市場掃描池
 # =========================================================
+def build_dynamic_tw_scan_pool(top_n_value: int = 80, top_n_volume: int = 60) -> List[str]:
+    df = fetch_twse_stock_day_all()
+    pool = []
+
+    if not df.empty:
+        work = df.copy()
+        work = work[work["代碼"].notna()]
+        work["代碼"] = work["代碼"].astype(str).str.strip()
+        work = work[work["收盤價"].fillna(0) > 0]
+
+        if "成交金額" in work.columns:
+            top_value = work.sort_values("成交金額", ascending=False).head(top_n_value)["代碼"].tolist()
+            pool.extend(top_value)
+
+        if "成交股數" in work.columns:
+            top_volume = work.sort_values("成交股數", ascending=False).head(top_n_volume)["代碼"].tolist()
+            pool.extend(top_volume)
+
+    pool.extend(CORE_TW_POOL)
+
+    seen = set()
+    final_pool = []
+    for s in pool:
+        code = to_tw_code(s)
+        if code and code not in seen:
+            final_pool.append(code)
+            seen.add(code)
+    return final_pool
+
+
+def build_market_state(scan_df: pd.DataFrame) -> str:
+    df = pd.DataFrame(scan_df)
+    if df.empty:
+        return "資料不足"
+
+    scores = pd.to_numeric(df["評分"], errors="coerce").dropna()
+    if scores.empty:
+        return "資料不足"
+
+    avg_score = scores.mean()
+    if avg_score >= 45:
+        return "強勢盤"
+    elif avg_score >= 20:
+        return "震盪盤"
+    return "弱勢盤"
+
+
 def build_scan_row(symbol: str, market: str, stop_loss_pct: float, take_profit_pct: float) -> Dict[str, object]:
     health = calc_chip_health(symbol, market, stop_loss_pct, take_profit_pct)
 
@@ -661,6 +708,10 @@ def build_scan_row(symbol: str, market: str, stop_loss_pct: float, take_profit_p
         "殖利率%": health["殖利率%"],
         "股價淨值比": health["股價淨值比"],
         "異常事件": health["異常事件"],
+        "RSI": health["RSI"],
+        "外資": health["外資"],
+        "投信": health["投信"],
+        "自營商": health["自營商"],
     }
 
 
@@ -704,18 +755,37 @@ def make_order_df(top_df: pd.DataFrame, capital: float, alloc_pct: float) -> pd.
     return as_object_df(pd.DataFrame(rows))
 
 
-def run_auto_market_scan(stop_loss_pct: float, take_profit_pct: float, capital: float, alloc_pct: float):
+def run_auto_market_scan_v4(stop_loss_pct: float, take_profit_pct: float, capital: float, alloc_pct: float):
+    candidate_pool = build_dynamic_tw_scan_pool()
     results = []
     df_map = {}
 
-    for symbol in AUTO_TW_SCAN_POOL:
+    for symbol in candidate_pool:
+        health = calc_chip_health(symbol, "台股", stop_loss_pct, take_profit_pct)
+
+        # V4 實戰過濾
+        rsi_val = safe_float(health["RSI"])
+        ma_score = safe_float(health["均線"])
+        score = safe_float(health["綜合評分"])
+        current_price = safe_float(health["目前價"])
+
+        if current_price is None:
+            continue
+        if rsi_val is None or rsi_val < 50:
+            continue
+        if ma_score is not None and ma_score < 0:
+            continue
+        if score is not None and score < 20:
+            continue
+
         row = build_scan_row(symbol, "台股", stop_loss_pct, take_profit_pct)
         results.append(row)
         df_map[to_tw_code(symbol)] = fetch_price_history(symbol, period="6mo", market="台股")
 
     scan_df = pd.DataFrame(results)
     if not scan_df.empty:
-        scan_df = scan_df.sort_values(["評分"], ascending=False).reset_index(drop=True)
+        scan_df["評分_num"] = pd.to_numeric(scan_df["評分"], errors="coerce").fillna(-999)
+        scan_df = scan_df.sort_values(["評分_num"], ascending=False).drop(columns=["評分_num"]).reset_index(drop=True)
 
     top3_df = scan_df.head(3).copy() if not scan_df.empty else pd.DataFrame()
     order_df = make_order_df(top3_df, capital, alloc_pct) if not top3_df.empty else pd.DataFrame()
@@ -724,6 +794,7 @@ def run_auto_market_scan(stop_loss_pct: float, take_profit_pct: float, capital: 
     st.session_state["top3_df"] = as_object_df(top3_df)
     st.session_state["order_df"] = as_object_df(order_df)
     st.session_state["df_map"] = df_map
+    st.session_state["market_state"] = build_market_state(scan_df)
 
 
 # =========================================================
@@ -825,7 +896,7 @@ def build_position_scan_df(pos_df: pd.DataFrame, stop_loss_pct: float, take_prof
 
 
 # =========================================================
-# 搜尋查詢
+# 搜尋健檢
 # =========================================================
 def build_search_df(symbols: List[str], market_hint: str, stop_loss_pct: float, take_profit_pct: float) -> pd.DataFrame:
     rows = []
@@ -837,7 +908,7 @@ def build_search_df(symbols: List[str], market_hint: str, stop_loss_pct: float, 
 
 
 # =========================================================
-# 盤後日報
+# 日報
 # =========================================================
 def build_daily_report_df(positions_df: pd.DataFrame, search_symbols: List[str], stop_loss_pct: float, take_profit_pct: float) -> pd.DataFrame:
     rows = []
@@ -915,7 +986,7 @@ def send_line(text: str) -> Tuple[bool, str]:
 
 
 def build_priority_alerts(scan_df: pd.DataFrame, position_scan_df: pd.DataFrame) -> str:
-    lines = [f"上帝視角 Chip-style 高優先級提醒 {now_str()}"]
+    lines = [f"上帝視角 V4 高優先級提醒 {now_str()}"]
     added = 0
 
     if not pd.DataFrame(scan_df).empty:
@@ -996,6 +1067,7 @@ def init_state():
     st.session_state.setdefault("search_tw_df", pd.DataFrame())
     st.session_state.setdefault("search_us_df", pd.DataFrame())
     st.session_state.setdefault("daily_report_df", pd.DataFrame())
+    st.session_state.setdefault("market_state", "資料不足")
 
 
 def positions_df() -> pd.DataFrame:
@@ -1046,7 +1118,7 @@ st.markdown(
 # =========================================================
 # Sidebar
 # =========================================================
-st.sidebar.title("📱 上帝視角 設定")
+st.sidebar.title("📱 上帝視角 V4 設定")
 capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CAPITAL, step=10000)
 max_positions = st.sidebar.slider("同時持倉上限", 1, 5, DEFAULT_MAX_POSITIONS)
 single_position_pct = st.sidebar.slider("單檔上限 %", 10, 50, int(DEFAULT_SINGLE_POSITION_PCT * 100), step=5) / 100
@@ -1066,8 +1138,8 @@ st.session_state["refresh_seconds"] = refresh_seconds
 # =========================================================
 # Header
 # =========================================================
-st.title("📈 上帝視角 Chip-style 籌碼強化版 v2")
-st.caption("主動推薦三檔 / 台股搜尋 / 美股搜尋 / 籌碼健檢 / 盤後日報 / LINE 推播")
+st.title("📈 上帝視角 V4 動態市場掃描版")
+st.caption("主動推薦三檔 / 搜尋健檢 / 下單表 / 持倉追蹤 / 盤後日報 / LINE 推播")
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("總資金", f"{capital:,.0f}")
@@ -1075,17 +1147,19 @@ m2.metric("持倉上限", f"{max_positions} 檔")
 m3.metric("單檔上限", f"{single_position_pct:.0%}")
 m4.metric("當日停手", f"{daily_loss_stop_pct:.0%}")
 
-i1, i2 = st.columns(2)
+i1, i2, i3 = st.columns(3)
 with i1:
     st.info(f"最後刷新時間：{now_str()}")
 with i2:
     st.info(f"自動刷新：{'開啟' if auto_refresh else '關閉'} / {refresh_seconds} 秒")
+with i3:
+    st.info(f"盤面狀態：{st.session_state.get('market_state', '資料不足')}")
 
-if st.button("🔍 啟動市場掃描", type="primary", use_container_width=True):
-    run_auto_market_scan(stop_loss_pct, take_profit_pct, capital, single_position_pct)
+if st.button("🔍 啟動 V4 市場掃描", type="primary", use_container_width=True):
+    run_auto_market_scan_v4(stop_loss_pct, take_profit_pct, capital, single_position_pct)
 
 if st.session_state["scan_df"].empty:
-    run_auto_market_scan(stop_loss_pct, take_profit_pct, capital, single_position_pct)
+    run_auto_market_scan_v4(stop_loss_pct, take_profit_pct, capital, single_position_pct)
 
 if auto_refresh:
     auto_refresh_script(refresh_seconds)
@@ -1112,11 +1186,8 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📲 推播中心"
 ])
 
-# =========================================================
-# Tab1 主動推薦三檔
-# =========================================================
 with tab1:
-    st.subheader("明日 / 盤中最強三檔（系統主動掃描）")
+    st.subheader("明日 / 盤中最強三檔（市場動態掃描）")
     if top3_df.empty:
         st.info("尚無推薦結果。")
     else:
@@ -1141,9 +1212,6 @@ with tab1:
             chart_market = top3_df[top3_df["代碼"] == chart_symbol]["市場"].iloc[0]
             draw_chart_no_plotly(df_map.get(chart_symbol, fetch_price_history(chart_symbol, period="6mo", market=chart_market)), chart_symbol)
 
-# =========================================================
-# Tab2 搜尋健檢
-# =========================================================
 with tab2:
     st.subheader("台股 / 美股搜尋健檢")
     s1, s2 = st.columns(2)
@@ -1164,9 +1232,6 @@ with tab2:
         else:
             st.info("左側輸入美股搜尋代碼後會顯示。")
 
-# =========================================================
-# Tab3 下單表
-# =========================================================
 with tab3:
     st.subheader("國泰手動下單表（來自主動推薦三檔）")
     if order_df.empty:
@@ -1180,9 +1245,6 @@ with tab3:
             "text/csv"
         )
 
-# =========================================================
-# Tab4 持倉追蹤
-# =========================================================
 with tab4:
     st.subheader("持倉追蹤面板")
     pos_df = positions_df()
@@ -1231,9 +1293,6 @@ with tab4:
         st.subheader("持倉即時掃描結果")
         st.dataframe(as_object_df(position_scan_df), use_container_width=True, hide_index=True)
 
-# =========================================================
-# Tab5 盤後籌碼日報
-# =========================================================
 with tab5:
     st.subheader("盤後籌碼日報")
     search_symbols_for_report = [to_tw_code(s) for s in tw_search_symbols] + [normalize_symbol(s) for s in us_search_symbols]
@@ -1251,9 +1310,6 @@ with tab5:
             "text/csv"
         )
 
-# =========================================================
-# Tab6 推播中心
-# =========================================================
 with tab6:
     st.subheader("LINE 推播中心（只推高優先級）")
     priority_text = build_priority_alerts(
@@ -1275,14 +1331,14 @@ with tab6:
     with a2:
         st.info("已設定 LINE secrets" if line_enabled() else "尚未設定 LINE secrets")
 
-    st.markdown("**v2 架構重點**")
+    st.markdown("**V4 重點**")
     st.markdown(
-        "- 台股搜尋 / 美股搜尋：做個股詢問與趨勢健檢\n"
-        "- 明日/盤中最強三檔：由系統從市場掃描後主動推薦\n"
+        "- 台股搜尋 / 美股搜尋：個股詢問與趨勢健檢\n"
+        "- 最強三檔：由市場動態候選池掃描後主動推薦\n"
+        "- 候選池：成交金額 / 成交股數 / ETF / 權值 / 熱門族群\n"
         "- 盤中異常：放量 / 突破 / 跌破 / 急拉 / 急殺\n"
-        "- 持股與搜尋股都能進盤後日報\n"
         "- LINE 只推高優先級事件"
     )
 
 st.markdown("---")
-st.caption("上帝視角 Chip-style 籌碼強化版 v2：研究與決策輔助用途，不保證獲利。")
+st.caption("上帝視角 V4 動態市場掃描版：研究與決策輔助用途，不保證獲利。")

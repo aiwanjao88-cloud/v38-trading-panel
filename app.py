@@ -80,9 +80,12 @@ def to_yf_symbol(symbol: str, market: str = "") -> str:
 
 def safe_float(x):
     try:
-        if x in [None, "", "-", "--", "None", "nan"]:
+        if x in [None, "", "-", "--", "None", "nan", "NaN"]:
             return None
-        return float(str(x).replace(",", ""))
+        val = float(str(x).replace(",", ""))
+        if pd.isna(val):
+            return None
+        return val
     except Exception:
         return None
 
@@ -478,7 +481,9 @@ def build_position_scan_df(pos_df: pd.DataFrame, period: str, stop_loss_pct: flo
 # =========================
 def recommend_qty(capital: float, alloc_pct: float, entry: Optional[float], market: str) -> Tuple[float, int]:
     budget = capital * alloc_pct
-    if not entry or entry <= 0:
+
+    entry = safe_float(entry)
+    if entry is None or entry <= 0:
         return budget, 0
 
     if market == "台股":
@@ -492,7 +497,9 @@ def recommend_qty(capital: float, alloc_pct: float, entry: Optional[float], mark
 def make_order_df(top_df: pd.DataFrame, capital: float, alloc_pct: float) -> pd.DataFrame:
     rows = []
     for _, row in top_df.iterrows():
-        budget, qty = recommend_qty(capital, alloc_pct, safe_float(row["建議進場價"]), row["市場"])
+        entry_price = safe_float(row.get("建議進場價"))
+        budget, qty = recommend_qty(capital, alloc_pct, entry_price, row["市場"])
+
         rows.append({
             "市場": row["市場"],
             "代碼": row["代碼"],
@@ -741,7 +748,7 @@ st.session_state["refresh_seconds"] = refresh_seconds
 # =========================
 # Header
 # =========================
-st.title("📈 上帝視角 TWSE Pro 修正版")
+st.title("📈 上帝視角 TWSE Pro 最終穩定版")
 st.caption("可實戰三檔 / 國泰下單表 / 持倉追蹤 / 即時掃描 / LINE 推播")
 
 m1, m2, m3, m4 = st.columns(4)
@@ -911,15 +918,15 @@ with tab5:
     with a2:
         st.info("已設定 LINE secrets" if line_enabled() else "尚未設定 LINE secrets")
 
-    st.markdown("**TWSE Pro 修正版功能**")
+    st.markdown("**最終穩定版修正內容**")
     st.markdown(
-        "- 修正收盤顯示 None\n"
-        "- 修正進場/停損/停利空值\n"
-        "- 股名優先取 TWSE\n"
-        "- 台股以 TWSE 官方資料為主\n"
+        "- 修正下單表 ValueError\n"
+        "- 修正建議進場價 NaN\n"
+        "- 修正收盤/停損/停利空值\n"
+        "- 台股優先 TWSE 官方資料\n"
         "- 美股維持 yfinance\n"
         "- 保留可實戰三檔、下單表、持倉、LINE"
     )
 
 st.markdown("---")
-st.caption("上帝視角 TWSE Pro 修正版：研究與決策輔助用途，不保證獲利。")
+st.caption("上帝視角 TWSE Pro 最終穩定版：研究與決策輔助用途，不保證獲利。")

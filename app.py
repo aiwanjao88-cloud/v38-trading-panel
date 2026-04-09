@@ -10,7 +10,7 @@ import yfinance as yf
 st.set_page_config(page_title="上帝視角", page_icon="📱", layout="wide")
 
 # =========================
-# 預設值
+# 基本設定
 # =========================
 DEFAULT_CAPITAL = 200000
 DEFAULT_MAX_POSITIONS = 2
@@ -25,7 +25,7 @@ TWSE_BWIBBU_ALL_URL = "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL"
 
 
 # =========================
-# 基本工具
+# 共用工具
 # =========================
 def now_str() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -35,32 +35,6 @@ def normalize_symbol(symbol: str) -> str:
     if symbol is None:
         return ""
     return str(symbol).strip().upper()
-
-
-def is_tw_stock(symbol: str) -> bool:
-    symbol = normalize_symbol(symbol)
-    return symbol.isdigit() or symbol.endswith(".TW")
-
-
-def to_tw_code(symbol: str) -> str:
-    symbol = normalize_symbol(symbol)
-    if symbol.endswith(".TW"):
-        return symbol[:-3]
-    return symbol
-
-
-def to_yf_symbol(symbol: str, market: str = "") -> str:
-    symbol = normalize_symbol(symbol)
-    if not symbol:
-        return ""
-
-    if symbol.endswith(".TW"):
-        return symbol
-
-    if market == "台股" and symbol.isdigit():
-        return symbol + ".TW"
-
-    return symbol
 
 
 def parse_symbols(raw: str) -> List[str]:
@@ -81,6 +55,29 @@ def parse_symbols(raw: str) -> List[str]:
     return out
 
 
+def is_tw_stock(symbol: str) -> bool:
+    symbol = normalize_symbol(symbol)
+    return symbol.isdigit() or symbol.endswith(".TW")
+
+
+def to_tw_code(symbol: str) -> str:
+    symbol = normalize_symbol(symbol)
+    if symbol.endswith(".TW"):
+        return symbol[:-3]
+    return symbol
+
+
+def to_yf_symbol(symbol: str, market: str = "") -> str:
+    symbol = normalize_symbol(symbol)
+    if not symbol:
+        return ""
+    if symbol.endswith(".TW"):
+        return symbol
+    if market == "台股" and symbol.isdigit():
+        return symbol + ".TW"
+    return symbol
+
+
 def safe_float(x):
     try:
         if x in [None, "", "-", "--"]:
@@ -90,17 +87,8 @@ def safe_float(x):
         return None
 
 
-def safe_int(x):
-    try:
-        if x in [None, "", "-", "--"]:
-            return None
-        return int(float(str(x).replace(",", "")))
-    except Exception:
-        return None
-
-
 # =========================
-# TWSE OpenAPI
+# TWSE 官方資料
 # =========================
 @st.cache_data(ttl=120)
 def fetch_twse_stock_day_all() -> pd.DataFrame:
@@ -124,9 +112,7 @@ def fetch_twse_stock_day_all() -> pd.DataFrame:
             "Change": "漲跌價差",
             "Transaction": "成交筆數",
         }
-        for old, new in rename_map.items():
-            if old in df.columns:
-                df = df.rename(columns={old: new})
+        df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
 
         if "代碼" in df.columns:
             df["代碼"] = df["代碼"].astype(str).str.strip()
@@ -157,9 +143,7 @@ def fetch_twse_bwibbu_all() -> pd.DataFrame:
             "DividendYield": "殖利率%",
             "PBratio": "股價淨值比",
         }
-        for old, new in rename_map.items():
-            if old in df.columns:
-                df = df.rename(columns={old: new})
+        df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
 
         if "代碼" in df.columns:
             df["代碼"] = df["代碼"].astype(str).str.strip()
@@ -217,7 +201,7 @@ def get_tw_stock_info(code: str) -> Dict[str, object]:
 
 
 # =========================
-# 美股
+# 美股資料
 # =========================
 @st.cache_data(ttl=180)
 def get_us_stock_info(symbol: str) -> Dict[str, object]:
@@ -257,6 +241,13 @@ def get_us_stock_info(symbol: str) -> Dict[str, object]:
     return result
 
 
+def get_stock_info(symbol: str, market: str) -> Dict[str, object]:
+    symbol = normalize_symbol(symbol)
+    if market == "台股" or is_tw_stock(symbol):
+        return get_tw_stock_info(symbol)
+    return get_us_stock_info(symbol)
+
+
 # =========================
 # 技術分析
 # =========================
@@ -264,10 +255,8 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-
     avg_gain = gain.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
-
     rs = avg_gain / avg_loss.replace(0, pd.NA)
     return (100 - (100 / (1 + rs))).fillna(0)
 
@@ -288,7 +277,6 @@ def fetch_price_history(symbol: str, period: str = "6mo", market: str = "") -> p
 
         keep = [c for c in ["Open", "High", "Low", "Close", "Adj Close", "Volume"] if c in df.columns]
         df = df[keep].copy()
-
         if "Close" not in df.columns:
             return pd.DataFrame()
 
@@ -298,7 +286,6 @@ def fetch_price_history(symbol: str, period: str = "6mo", market: str = "") -> p
         df["VOL20"] = df["Volume"].rolling(20).mean() if "Volume" in df.columns else 0
         df["RSI14"] = rsi(df["Close"], 14)
         df["Prev20High"] = df["High"].rolling(20).max().shift(1)
-
         df["Signal_Breakout"] = (df["Close"] > df["Prev20High"]) & (df["Volume"] > df["VOL20"])
         df["Signal_Trend"] = (df["Close"] > df["MA5"]) & (df["MA5"] > df["MA60"])
         df["Signal_Pullback"] = (
@@ -385,23 +372,12 @@ def calc_signal(df: pd.DataFrame, stop_loss_pct: float, take_profit_pct: float) 
 
 
 # =========================
-# 資訊整合
+# 持倉資料
 # =========================
-def get_stock_info(symbol: str, market: str) -> Dict[str, object]:
-    symbol = normalize_symbol(symbol)
-    market = str(market).strip()
-
-    if market == "台股" or is_tw_stock(symbol):
-        return get_tw_stock_info(symbol)
-
-    return get_us_stock_info(symbol)
-
-
 def ensure_position_columns(df: pd.DataFrame) -> pd.DataFrame:
     required = [
-        "市場", "代碼", "股名", "持有數量", "成本價",
-        "目前價", "報酬率%", "停損價", "第一停利價", "狀態",
-        "本益比", "殖利率%", "股價淨值比"
+        "市場", "代碼", "股名", "持有數量", "成本價", "目前價", "報酬率%",
+        "停損價", "第一停利價", "狀態", "本益比", "殖利率%", "股價淨值比"
     ]
     out = pd.DataFrame(df).copy()
     for col in required:
@@ -417,7 +393,7 @@ def enrich_positions_auto(df: pd.DataFrame) -> pd.DataFrame:
 
     for idx, row in out.iterrows():
         symbol = normalize_symbol(row.get("代碼", ""))
-        market = row.get("市場", "")
+        market = str(row.get("市場", "")).strip()
         if not symbol:
             continue
 
@@ -459,7 +435,7 @@ def build_position_scan_df(pos_df: pd.DataFrame, period: str, stop_loss_pct: flo
     rows = []
     for _, row in pos_df.iterrows():
         symbol = normalize_symbol(row.get("代碼", ""))
-        market = row.get("市場", "")
+        market = str(row.get("市場", "")).strip()
         if not symbol:
             continue
 
@@ -481,11 +457,12 @@ def build_position_scan_df(pos_df: pd.DataFrame, period: str, stop_loss_pct: flo
 
     if not rows:
         return pd.DataFrame()
-
-    result = pd.DataFrame(rows)
-    return result.sort_values(["評分", "市場"], ascending=[False, True]).reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values(["評分", "市場"], ascending=[False, True]).reset_index(drop=True)
 
 
+# =========================
+# 掃描與下單
+# =========================
 def recommend_qty(capital: float, alloc_pct: float, entry: Optional[float], market: str) -> Tuple[float, int]:
     budget = capital * alloc_pct
     if not entry or entry <= 0:
@@ -518,85 +495,6 @@ def make_order_df(top_df: pd.DataFrame, capital: float, alloc_pct: float) -> pd.
     return pd.DataFrame(rows)
 
 
-def build_alert_text(top_df: pd.DataFrame) -> str:
-    lines = [f"上帝視角 TWSE強化版 訊號 {now_str()}"]
-    if top_df.empty:
-        lines.append("目前沒有可用訊號。")
-        return "\n".join(lines)
-
-    for _, row in top_df.iterrows():
-        stock_name = row.get("股名", row["代碼"])
-        lines.append(
-            f"{row['代碼']} {stock_name}｜{row['訊號']}｜進場 {row['建議進場價']}｜停損 {row['停損價']}｜停利 {row['第一停利價']}"
-        )
-    return "\n".join(lines)
-
-
-def line_enabled() -> bool:
-    return "line_channel_access_token" in st.secrets and "line_to" in st.secrets
-
-
-def send_line(text: str) -> Tuple[bool, str]:
-    if not line_enabled():
-        return False, "尚未設定 line_channel_access_token / line_to"
-
-    url = "https://api.line.me/v2/bot/message/push"
-    headers = {
-        "Authorization": f"Bearer {st.secrets['line_channel_access_token']}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "to": st.secrets["line_to"],
-        "messages": [{"type": "text", "text": text[:5000]}],
-    }
-
-    try:
-        r = requests.post(url, headers=headers, json=payload, timeout=20)
-        if 200 <= r.status_code < 300:
-            return True, "LINE 推播成功"
-        return False, f"推播失敗：HTTP {r.status_code} / {r.text[:180]}"
-    except Exception as e:
-        return False, f"推播失敗：{e}"
-
-
-def draw_chart_no_plotly(df: pd.DataFrame, symbol: str):
-    if df.empty:
-        st.warning(f"{symbol} 無資料")
-        return
-
-    st.markdown(f"**{symbol} 走勢圖**")
-    chart_df = pd.DataFrame(index=df.index)
-    chart_df["Close"] = df["Close"]
-    chart_df["MA5"] = df["MA5"]
-    chart_df["MA20"] = df["MA20"]
-    chart_df["MA60"] = df["MA60"]
-    st.line_chart(chart_df, use_container_width=True)
-
-    latest = df.iloc[-1]
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("收盤", f"{safe_float(latest.get('Close')):.2f}" if safe_float(latest.get("Close")) is not None else "-")
-    c2.metric("MA5", f"{safe_float(latest.get('MA5')):.2f}" if safe_float(latest.get("MA5")) is not None else "-")
-    c3.metric("MA60", f"{safe_float(latest.get('MA60')):.2f}" if safe_float(latest.get("MA60")) is not None else "-")
-    c4.metric("RSI14", f"{safe_float(latest.get('RSI14')):.2f}" if safe_float(latest.get("RSI14")) is not None else "-")
-
-
-def auto_refresh_script(seconds: int):
-    ms = max(int(seconds), 10) * 1000
-    components.html(
-        f"""
-        <script>
-            setTimeout(function() {{
-                window.parent.location.reload();
-            }}, {ms});
-        </script>
-        """,
-        height=0,
-    )
-
-
-# =========================
-# 掃描主流程
-# =========================
 def run_scan(symbols_tw: List[str], symbols_us: List[str], period: str, stop_loss_pct: float, take_profit_pct: float, capital: float, alloc_pct: float):
     results = []
     df_map = {}
@@ -661,7 +559,89 @@ def run_scan(symbols_tw: List[str], symbols_us: List[str], period: str, stop_los
 
 
 # =========================
-# Session 初始化
+# LINE
+# =========================
+def line_enabled() -> bool:
+    return "line_channel_access_token" in st.secrets and "line_to" in st.secrets
+
+
+def send_line(text: str) -> Tuple[bool, str]:
+    if not line_enabled():
+        return False, "尚未設定 line_channel_access_token / line_to"
+
+    url = "https://api.line.me/v2/bot/message/push"
+    headers = {
+        "Authorization": f"Bearer {st.secrets['line_channel_access_token']}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "to": st.secrets["line_to"],
+        "messages": [{"type": "text", "text": text[:5000]}],
+    }
+
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=20)
+        if 200 <= r.status_code < 300:
+            return True, "LINE 推播成功"
+        return False, f"推播失敗：HTTP {r.status_code} / {r.text[:180]}"
+    except Exception as e:
+        return False, f"推播失敗：{e}"
+
+
+def build_alert_text(top_df: pd.DataFrame) -> str:
+    lines = [f"上帝視角 TWSE Pro 訊號 {now_str()}"]
+    if top_df.empty:
+        lines.append("目前沒有可用訊號。")
+        return "\n".join(lines)
+
+    for _, row in top_df.iterrows():
+        stock_name = row.get("股名", row["代碼"])
+        lines.append(
+            f"{row['代碼']} {stock_name}｜{row['訊號']}｜進場 {row['建議進場價']}｜停損 {row['停損價']}｜停利 {row['第一停利價']}"
+        )
+    return "\n".join(lines)
+
+
+# =========================
+# 畫圖與刷新
+# =========================
+def draw_chart_no_plotly(df: pd.DataFrame, symbol: str):
+    if df.empty:
+        st.warning(f"{symbol} 無資料")
+        return
+
+    st.markdown(f"**{symbol} 走勢圖**")
+    chart_df = pd.DataFrame(index=df.index)
+    chart_df["Close"] = df["Close"]
+    chart_df["MA5"] = df["MA5"]
+    chart_df["MA20"] = df["MA20"]
+    chart_df["MA60"] = df["MA60"]
+    st.line_chart(chart_df, use_container_width=True)
+
+    latest = df.iloc[-1]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("收盤", f"{safe_float(latest.get('Close')):.2f}" if safe_float(latest.get("Close")) is not None else "-")
+    c2.metric("MA5", f"{safe_float(latest.get('MA5')):.2f}" if safe_float(latest.get("MA5")) is not None else "-")
+    c3.metric("MA60", f"{safe_float(latest.get('MA60')):.2f}" if safe_float(latest.get("MA60")) is not None else "-")
+    c4.metric("RSI14", f"{safe_float(latest.get('RSI14')):.2f}" if safe_float(latest.get("RSI14")) is not None else "-")
+
+
+def auto_refresh_script(seconds: int):
+    ms = max(int(seconds), 10) * 1000
+    components.html(
+        f"""
+        <script>
+            setTimeout(function() {{
+                window.parent.location.reload();
+            }}, {ms});
+        </script>
+        """,
+        height=0,
+    )
+
+
+# =========================
+# Session state
 # =========================
 def init_state():
     st.session_state.setdefault("scan_df", pd.DataFrame())
@@ -745,19 +725,19 @@ st.session_state["refresh_seconds"] = refresh_seconds
 # =========================
 # Header
 # =========================
-st.title("📈 上帝視角 TWSE強化版")
-st.caption("台股以 TWSE OpenAPI 為主 / 美股使用 yfinance")  # factual support above cited
+st.title("📈 上帝視角 TWSE Pro")
+st.caption("可實戰三檔 / 國泰下單表 / 持倉追蹤 / 即時掃描 / LINE 推播")
 
-h1, h2, h3, h4 = st.columns(4)
-h1.metric("總資金", f"{capital:,.0f}")
-h2.metric("持倉上限", f"{max_positions} 檔")
-h3.metric("單檔上限", f"{single_position_pct:.0%}")
-h4.metric("當日停手", f"{daily_loss_stop_pct:.0%}")
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("總資金", f"{capital:,.0f}")
+m2.metric("持倉上限", f"{max_positions} 檔")
+m3.metric("單檔上限", f"{single_position_pct:.0%}")
+m4.metric("當日停手", f"{daily_loss_stop_pct:.0%}")
 
-info1, info2 = st.columns(2)
-with info1:
+i1, i2 = st.columns(2)
+with i1:
     st.info(f"最後刷新時間：{now_str()}")
-with info2:
+with i2:
     st.info(f"自動刷新：{'開啟' if auto_refresh else '關閉'} / {refresh_seconds} 秒")
 
 if st.button("🔍 立即重新掃描", type="primary", use_container_width=True):
@@ -787,31 +767,29 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 
 with tab1:
     st.subheader("明日 / 盤中實戰 3 檔")
-
     if top3_df.empty:
         st.info("請先在左側輸入台股清單或美股清單，再按『立即重新掃描』。")
     else:
         st.dataframe(top3_df, use_container_width=True, hide_index=True)
 
-        quick_cards = st.columns(min(3, len(top3_df)))
+        cards = st.columns(min(3, len(top3_df)))
         for i, (_, row) in enumerate(top3_df.iterrows()):
-            with quick_cards[i]:
+            with cards[i]:
                 st.markdown(f"**{row['代碼']}**")
                 st.caption(f"{row['股名']}｜{row['市場']}｜{row['訊號']}")
                 st.write(f"進場：{row['建議進場價']}")
                 st.write(f"停損：{row['停損價']}")
                 st.write(f"停利：{row['第一停利價']}")
 
-        symbol = st.selectbox("查看圖表", options=top3_df["代碼"].tolist())
-        market = top3_df[top3_df["代碼"] == symbol]["市場"].iloc[0]
-        draw_chart_no_plotly(df_map.get(symbol, fetch_price_history(symbol, period=period, market=market)), symbol)
-
         st.subheader("完整排行")
         st.dataframe(scan_df, use_container_width=True, hide_index=True)
 
+        chart_symbol = st.selectbox("查看圖表", options=top3_df["代碼"].tolist())
+        chart_market = top3_df[top3_df["代碼"] == chart_symbol]["市場"].iloc[0]
+        draw_chart_no_plotly(df_map.get(chart_symbol, fetch_price_history(chart_symbol, period=period, market=chart_market)), chart_symbol)
+
 with tab2:
     st.subheader("國泰手動下單表")
-
     if order_df.empty:
         st.info("尚無下單表，請先完成掃描。")
     else:
@@ -825,8 +803,8 @@ with tab2:
 
 with tab3:
     st.subheader("持倉追蹤面板")
-
     pos_df = positions_df()
+
     edited_pos = st.data_editor(
         pos_df,
         use_container_width=True,
@@ -836,6 +814,7 @@ with tab3:
     )
 
     c1, c2 = st.columns(2)
+
     with c1:
         if st.button("⚡ 自動補齊資訊", use_container_width=True):
             safe_df = ensure_position_columns(pd.DataFrame(edited_pos))
@@ -858,12 +837,12 @@ with tab3:
     if not latest_positions.empty:
         st.dataframe(latest_positions, use_container_width=True, hide_index=True)
 
-        valid_returns = pd.to_numeric(latest_positions["報酬率%"], errors="coerce")
-        avg_ret = valid_returns.mean() if valid_returns.notna().any() else 0
+        avg_ret = pd.to_numeric(latest_positions["報酬率%"], errors="coerce").mean()
+        avg_ret = 0 if pd.isna(avg_ret) else avg_ret
 
-        m1, m2 = st.columns(2)
-        m1.metric("持倉檔數", len(latest_positions))
-        m2.metric("平均報酬率%", f"{avg_ret:.2f}")
+        p1, p2 = st.columns(2)
+        p1.metric("持倉檔數", len(latest_positions))
+        p2.metric("平均報酬率%", f"{avg_ret:.2f}")
 
     position_scan_df = st.session_state.get("position_scan_df", pd.DataFrame())
     if not position_scan_df.empty:
@@ -882,13 +861,13 @@ with tab4:
         key="trade_log_editor"
     )
 
-    c1, c2 = st.columns(2)
-    with c1:
+    l1, l2 = st.columns(2)
+    with l1:
         if st.button("💾 儲存交易紀錄", use_container_width=True):
             save_trade_log(pd.DataFrame(edited_log).fillna("").to_dict("records"))
             st.success("交易紀錄已儲存")
 
-    with c2:
+    with l2:
         if not pd.DataFrame(edited_log).empty:
             st.download_button(
                 "⬇️ 匯出交易紀錄 CSV",
@@ -916,14 +895,15 @@ with tab5:
     with a2:
         st.info("已設定 LINE secrets" if line_enabled() else "尚未設定 LINE secrets")
 
-    st.markdown("**TWSE 強化版功能**")
+    st.markdown("**TWSE Pro 功能**")
     st.markdown(
-        "- 台股改用 TWSE OpenAPI\n"
-        "- 支援直接輸入台股代碼 2330\n"
-        "- 自動補股名 / 目前價 / 本益比 / 殖利率 / 股價淨值比\n"
-        "- 修正 data_editor 轉 DataFrame 的穩定性\n"
-        "- 美股維持 yfinance"
+        "- 可實戰三檔\n"
+        "- 國泰手動下單表\n"
+        "- 持倉追蹤 + 即時掃描\n"
+        "- 台股 TWSE 官方資料\n"
+        "- 美股 yfinance\n"
+        "- LINE 推播"
     )
 
 st.markdown("---")
-st.caption("上帝視角 TWSE強化版：研究與決策輔助用途，不保證獲利。")
+st.caption("上帝視角 TWSE Pro：研究與決策輔助用途，不保證獲利。")

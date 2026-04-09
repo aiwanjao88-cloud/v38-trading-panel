@@ -1,785 +1,140 @@
-from datetime import datetime
-from typing import Dict, List, Optional, Tuple
-
-import pandas as pd
 import requests
+import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 import yfinance as yf
+from datetime import datetime
 
-st.set_page_config(page_title="上帝視角", page_icon="📱", layout="wide")
-
-# =========================
-# 預設值
-# =========================
-TW_DEFAULTS = ["2330.TW", "2317.TW", "2382.TW", "2454.TW", "2308.TW", "2603.TW"]
-US_DEFAULTS = ["NVDA", "TSM", "QQQM", "SMH", "AVGO", "MSFT"]
-
-DEFAULT_CAPITAL = 200000
-DEFAULT_MAX_POSITIONS = 2
-DEFAULT_SINGLE_POSITION_PCT = 0.30
-DEFAULT_STOP_LOSS_PCT = 0.05
-DEFAULT_TAKE_PROFIT_PCT = 0.10
-DEFAULT_DAILY_LOSS_STOP_PCT = 0.05
-DEFAULT_REFRESH_SECONDS = 60
-
+st.set_page_config(page_title="上帝視角", layout="wide")
 
 # =========================
-# 工具函式
+# TWSE 即時資料
 # =========================
-def now_str() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def parse_symbols(raw: str) -> List[str]:
-    items = []
-    for x in raw.replace("\n", ",").split(","):
-        s = x.strip().upper()
-        if s:
-            items.append(s)
-
-    seen = set()
-    out = []
-    for s in items:
-        if s not in seen:
-            out.append(s)
-            seen.add(s)
-    return out
-
-
-def normalize_symbol(symbol: str) -> str:
-    if symbol is None:
-        return ""
-    return str(symbol).strip().upper()
-
-
-def rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-
-    avg_gain = gain.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
-
-    rs = avg_gain / avg_loss.replace(0, pd.NA)
-    return (100 - (100 / (1 + rs))).fillna(0)
-
-
-@st.cache_data(ttl=180)
-def fetch_price_history(symbol: str, period: str = "6mo") -> pd.DataFrame:
-    symbol = normalize_symbol(symbol)
-    if not symbol:
-        return pd.DataFrame()
-
-    df = yf.download(symbol, period=period, interval="1d", auto_adjust=False, progress=False)
-
-    if df is None or df.empty:
-        return pd.DataFrame()
-
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [c[0] for c in df.columns]
-
-    keep = [c for c in ["Open", "High", "Low", "Close", "Adj Close", "Volume"] if c in df.columns]
-    df = df[keep].copy()
-
-    if "Close" not in df.columns:
-        return pd.DataFrame()
-
-    df["MA5"] = df["Close"].rolling(5).mean()
-    df["MA20"] = df["Close"].rolling(20).mean()
-    df["MA60"] = df["Close"].rolling(60).mean()
-    df["VOL20"] = df["Volume"].rolling(20).mean() if "Volume" in df.columns else 0
-    df["RSI14"] = rsi(df["Close"], 14)
-    df["Prev20High"] = df["High"].rolling(20).max().shift(1)
-
-    df["Signal_Breakout"] = (df["Close"] > df["Prev20High"]) & (df["Volume"] > df["VOL20"])
-    df["Signal_Trend"] = (df["Close"] > df["MA5"]) & (df["MA5"] > df["MA60"])
-    df["Signal_Pullback"] = (
-        (df["Low"] <= df["MA5"]) &
-        (df["Close"] > df["MA5"]) &
-        (df["MA5"] > df["MA60"])
-    )
-
-    return df.dropna(how="all")
-
-
-@st.cache_data(ttl=3600)
-def get_symbol_name(symbol: str) -> str:
-    symbol = normalize_symbol(symbol)
-    if not symbol:
-        return ""
+@st.cache_data(ttl=30)
+def get_twse_realtime(symbol):
+    code = symbol.replace(".TW", "")
+    url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{code}.tw"
 
     try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.info if hasattr(ticker, "info") else {}
-        name = (
-            info.get("shortName")
-            or info.get("longName")
-            or info.get("displayName")
-            or ""
-        )
-        if name:
-            return str(name)
-    except Exception:
+        r = requests.get(url, timeout=5)
+        data = r.json()
+
+        if data["msgArray"]:
+            d = data["msgArray"][0]
+            price = float(d["z"]) if d["z"] != "-" else None
+            name = d["n"]
+
+            return {
+                "price": price,
+                "name": name
+            }
+    except:
         pass
 
-    return symbol
+    return {"price": None, "name": symbol}
 
 
-def calc_signal(df: pd.DataFrame, stop_loss_pct: float, take_profit_pct: float) -> Dict[str, object]:
-    if df.empty or len(df) < 65:
-        return {
-            "signal": "資料不足",
-            "entry": None,
-            "stop": None,
-            "tp1": None,
-            "score": -999,
-            "reason": "資料不足",
-            "close": None,
-        }
+# =========================
+# 美股
+# =========================
+@st.cache_data(ttl=60)
+def get_us_price(symbol):
+    try:
+        df = yf.download(symbol, period="5d", progress=False)
+        price = float(df["Close"].iloc[-1])
+        name = yf.Ticker(symbol).info.get("shortName", symbol)
+        return {"price": price, "name": name}
+    except:
+        return {"price": None, "name": symbol}
 
-    last = df.iloc[-1]
-    close = float(last["Close"])
-    ma5 = float(last["MA5"]) if pd.notna(last["MA5"]) else None
-    ma60 = float(last["MA60"]) if pd.notna(last["MA60"]) else None
-    vol = float(last["Volume"]) if pd.notna(last["Volume"]) else 0
-    vol20 = float(last["VOL20"]) if pd.notna(last["VOL20"]) else 0
-    prev20h = float(last["Prev20High"]) if pd.notna(last["Prev20High"]) else None
-    r = float(last["RSI14"]) if pd.notna(last["RSI14"]) else 0
 
-    trend_ok = ma5 is not None and ma60 is not None and close > ma5 > ma60
-    breakout = bool(last["Signal_Breakout"])
-    pullback = bool(last["Signal_Pullback"])
+# =========================
+# 自動補資料
+# =========================
+def enrich_position(row):
+    symbol = row["代碼"]
 
-    score = 0
-    reasons = []
-
-    if trend_ok:
-        score += 40
-        reasons.append("5MA>60MA 且收盤站上5MA")
-
-    if breakout:
-        score += 35
-        reasons.append("突破20日高點且量增")
-
-    if pullback:
-        score += 15
-        reasons.append("回踩5MA承接")
-
-    if vol20 > 0 and vol > vol20:
-        score += 5
-
-    if 50 <= r <= 78:
-        score += 10
-        reasons.append(f"RSI14={r:.1f}")
-    elif r > 80:
-        score -= 5
-        reasons.append(f"RSI14={r:.1f} 偏熱")
-
-    signal = "觀察"
-    entry = None
-
-    if breakout and trend_ok:
-        signal = "突破買進"
-        entry = round(max(close, prev20h or close), 2)
-    elif pullback and trend_ok:
-        signal = "5MA承接"
-        entry = round(ma5, 2) if ma5 else round(close, 2)
-    elif trend_ok:
-        signal = "趨勢續抱"
-        entry = round(close, 2)
+    if symbol.isdigit():
+        symbol_full = symbol + ".TW"
+        data = get_twse_realtime(symbol_full)
     else:
-        score -= 15
-        reasons.append("未形成多頭趨勢")
+        symbol_full = symbol
+        data = get_us_price(symbol)
 
-    return {
-        "signal": signal,
-        "entry": entry,
-        "stop": round(close * (1 - stop_loss_pct), 2),
-        "tp1": round(close * (1 + take_profit_pct), 2),
-        "score": score,
-        "reason": "；".join(reasons),
-        "close": round(close, 2),
-    }
+    price = data["price"]
+    name = data["name"]
 
-
-def recommend_qty(capital: float, alloc_pct: float, entry: Optional[float], market: str) -> Tuple[float, int]:
-    budget = capital * alloc_pct
-    if not entry or entry <= 0:
-        return budget, 0
-
-    if market == "台股":
-        qty = int(budget // (entry * 1000))
-        return budget, max(qty, 0)
-
-    qty = int(budget // entry)
-    return budget, max(qty, 0)
-
-
-def make_order_df(top_df: pd.DataFrame, capital: float, alloc_pct: float) -> pd.DataFrame:
-    rows = []
-    for _, row in top_df.iterrows():
-        budget, qty = recommend_qty(capital, alloc_pct, row["建議進場價"], row["市場"])
-        rows.append({
-            "市場": row["市場"],
-            "代碼": row["代碼"],
-            "名稱": row.get("名稱", row["代碼"]),
-            "訊號": row["訊號"],
-            "委託類型": "現股/限價" if row["市場"] == "台股" else "複委託/限價",
-            "建議進場價": row["建議進場價"],
-            "停損價": row["停損價"],
-            "第一停利價": row["第一停利價"],
-            "配置金額": round(budget, 2),
-            "建議數量": f"{qty} 張" if row["市場"] == "台股" else f"{qty} 股",
-        })
-    return pd.DataFrame(rows)
-
-
-def line_enabled() -> bool:
-    return "line_channel_access_token" in st.secrets and "line_to" in st.secrets
-
-
-def send_line(text: str) -> Tuple[bool, str]:
-    if not line_enabled():
-        return False, "尚未設定 line_channel_access_token / line_to"
-
-    url = "https://api.line.me/v2/bot/message/push"
-    headers = {
-        "Authorization": f"Bearer {st.secrets['line_channel_access_token']}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "to": st.secrets["line_to"],
-        "messages": [{"type": "text", "text": text[:5000]}],
-    }
+    row["股名"] = name
+    row["目前價"] = price
 
     try:
-        r = requests.post(url, headers=headers, json=payload, timeout=20)
-        if 200 <= r.status_code < 300:
-            return True, "LINE 推播成功"
-        return False, f"推播失敗：HTTP {r.status_code} / {r.text[:180]}"
-    except Exception as e:
-        return False, f"推播失敗：{e}"
+        cost = float(row["成本價"])
+        if price:
+            row["報酬率%"] = round((price - cost) / cost * 100, 2)
+    except:
+        pass
 
+    # 狀態判斷
+    try:
+        stop = float(row["停損價"])
+        tp = float(row["第一停利價"])
 
-def build_alert_text(top_df: pd.DataFrame) -> str:
-    lines = [f"上帝視角 訊號 {now_str()}"]
-    if top_df.empty:
-        lines.append("目前沒有可用訊號。")
-        return "\n".join(lines)
-
-    for _, row in top_df.iterrows():
-        name = row.get("名稱", row["代碼"])
-        lines.append(
-            f"{row['代碼']} {name}｜{row['訊號']}｜進場 {row['建議進場價']}｜停損 {row['停損價']}｜停利 {row['第一停利價']}"
-        )
-    return "\n".join(lines)
-
-
-def draw_chart_no_plotly(df: pd.DataFrame, symbol: str):
-    if df.empty:
-        st.warning(f"{symbol} 無資料")
-        return
-
-    st.markdown(f"**{symbol} 走勢圖**")
-    chart_df = pd.DataFrame(index=df.index)
-    chart_df["Close"] = df["Close"]
-    chart_df["MA5"] = df["MA5"]
-    chart_df["MA20"] = df["MA20"]
-    chart_df["MA60"] = df["MA60"]
-    st.line_chart(chart_df, use_container_width=True)
-
-    latest = df.iloc[-1]
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("收盤", f"{float(latest['Close']):.2f}")
-    c2.metric("MA5", f"{float(latest['MA5']):.2f}" if pd.notna(latest["MA5"]) else "-")
-    c3.metric("MA60", f"{float(latest['MA60']):.2f}" if pd.notna(latest["MA60"]) else "-")
-    c4.metric("RSI14", f"{float(latest['RSI14']):.2f}" if pd.notna(latest["RSI14"]) else "-")
-
-
-def enrich_positions_with_names(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-
-    out = df.copy()
-
-    if "名稱" not in out.columns:
-        out["名稱"] = ""
-
-    if "代碼" not in out.columns:
-        out["代碼"] = ""
-
-    names = []
-    for _, row in out.iterrows():
-        symbol = normalize_symbol(row.get("代碼", ""))
-        if symbol:
-            names.append(get_symbol_name(symbol))
+        if price <= stop:
+            row["狀態"] = "🔴 停損"
+        elif price >= tp:
+            row["狀態"] = "🟢 停利"
         else:
-            names.append("")
-    out["代碼"] = out["代碼"].astype(str).str.upper().str.strip()
-    out["名稱"] = names
-    return out
+            row["狀態"] = "持有中"
+    except:
+        row["狀態"] = "持有中"
+
+    return row
 
 
-def build_position_scan_df(pos_df: pd.DataFrame, period: str, stop_loss_pct: float, take_profit_pct: float) -> pd.DataFrame:
-    if pos_df.empty:
-        return pd.DataFrame()
+# =========================
+# UI
+# =========================
+st.title("📈 上帝視角 TWSE版")
 
-    rows = []
-    for _, row in pos_df.iterrows():
-        symbol = normalize_symbol(row.get("代碼", ""))
-        market = row.get("市場", "")
-        name = row.get("名稱", "")
-        if not symbol:
-            continue
+# 側邊
+capital = st.sidebar.number_input("總資金", value=200000)
+tw_list = st.sidebar.text_area("台股清單（輸入代碼即可）", "")
+us_list = st.sidebar.text_area("美股清單", "")
 
-        df = fetch_price_history(symbol, period=period)
-        sig = calc_signal(df, stop_loss_pct, take_profit_pct)
+# =========================
+# 持倉面板
+# =========================
+st.subheader("💼 持倉追蹤")
 
-        rows.append({
-            "市場": market,
-            "代碼": symbol,
-            "名稱": name if name else get_symbol_name(symbol),
-            "收盤": sig["close"],
-            "訊號": sig["signal"],
-            "建議進場價": sig["entry"],
-            "停損價": sig["stop"],
-            "第一停利價": sig["tp1"],
-            "評分": sig["score"],
-            "理由": sig["reason"],
-        })
-
-    if not rows:
-        return pd.DataFrame()
-
-    result = pd.DataFrame(rows)
-    result = result.sort_values(["評分", "市場"], ascending=[False, True]).reset_index(drop=True)
-    return result
-
-
-def init_state():
-    st.session_state.setdefault("scan_df", pd.DataFrame())
-    st.session_state.setdefault("top3_df", pd.DataFrame())
-    st.session_state.setdefault("order_df", pd.DataFrame())
-    st.session_state.setdefault("df_map", {})
-    st.session_state.setdefault("positions", [])
-    st.session_state.setdefault("trade_log", [])
-    st.session_state.setdefault("last_alert_text", "")
-    st.session_state.setdefault("auto_refresh", False)
-    st.session_state.setdefault("refresh_seconds", DEFAULT_REFRESH_SECONDS)
-    st.session_state.setdefault("position_scan_df", pd.DataFrame())
-
-
-def save_positions(rows: List[Dict]):
-    st.session_state["positions"] = rows
-
-
-def save_trade_log(rows: List[Dict]):
-    st.session_state["trade_log"] = rows
-
-
-def positions_df() -> pd.DataFrame:
-    rows = st.session_state.get("positions", [])
-    if rows:
-        df = pd.DataFrame(rows)
-        df = ensure_position_columns(df)
-        return df
-
-    return pd.DataFrame(columns=[
-        "市場", "代碼", "名稱", "持有數量", "成本價", "目前價", "報酬率%", "停損價", "第一停利價", "狀態"
+if "positions" not in st.session_state:
+    st.session_state["positions"] = pd.DataFrame(columns=[
+        "市場", "代碼", "股名", "持有數量", "成本價",
+        "目前價", "報酬率%", "停損價", "第一停利價", "狀態"
     ])
 
-
-def ensure_position_columns(df: pd.DataFrame) -> pd.DataFrame:
-    required = ["市場", "代碼", "名稱", "持有數量", "成本價", "目前價", "報酬率%", "停損價", "第一停利價", "狀態"]
-    out = df.copy()
-    for col in required:
-        if col not in out.columns:
-            out[col] = ""
-    return out[required]
-
-
-def trade_log_df() -> pd.DataFrame:
-    rows = st.session_state.get("trade_log", [])
-    if rows:
-        return pd.DataFrame(rows)
-    return pd.DataFrame(columns=[
-        "日期", "市場", "代碼", "動作", "價格", "數量", "備註"
-    ])
-
-
-def update_position_prices(df_map: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-    pos = positions_df()
-    if pos.empty:
-        return pos
-
-    out = pos.copy()
-    out = enrich_positions_with_names(out)
-
-    current_prices = []
-    returns = []
-    status = []
-
-    for _, row in out.iterrows():
-        symbol = normalize_symbol(row["代碼"])
-        current = None
-
-        if symbol in df_map and not df_map[symbol].empty:
-            current = float(df_map[symbol]["Close"].iloc[-1])
-        else:
-            temp_df = fetch_price_history(symbol, period="3mo")
-            if not temp_df.empty:
-                current = float(temp_df["Close"].iloc[-1])
-
-        current_prices.append(current)
-
-        try:
-            cost = float(row["成本價"]) if row["成本價"] not in [None, ""] else None
-        except Exception:
-            cost = None
-
-        ret = ((current / cost) - 1) * 100 if current and cost else None
-        returns.append(round(ret, 2) if ret is not None else None)
-
-        stop = row["停損價"]
-        tp1 = row["第一停利價"]
-        s = "持有中"
-
-        try:
-            if current and stop not in [None, ""] and current <= float(stop):
-                s = "觸發停損"
-            elif current and tp1 not in [None, ""] and current >= float(tp1):
-                s = "到達停利一"
-        except Exception:
-            s = "持有中"
-
-        status.append(s)
-
-    out["目前價"] = current_prices
-    out["報酬率%"] = returns
-    out["狀態"] = status
-    out = ensure_position_columns(out)
-    save_positions(out.fillna("").to_dict("records"))
-    return out
-
-
-def run_scan(
-    symbols_tw: List[str],
-    symbols_us: List[str],
-    period: str,
-    stop_loss_pct: float,
-    take_profit_pct: float,
-    capital: float,
-    alloc_pct: float,
-):
-    results = []
-    df_map = {}
-
-    for symbol in symbols_tw:
-        df = fetch_price_history(symbol, period=period)
-        df_map[symbol] = df
-        if not df.empty:
-            sig = calc_signal(df, stop_loss_pct, take_profit_pct)
-            results.append({
-                "市場": "台股",
-                "代碼": symbol,
-                "名稱": get_symbol_name(symbol),
-                "收盤": sig["close"],
-                "訊號": sig["signal"],
-                "建議進場價": sig["entry"],
-                "停損價": sig["stop"],
-                "第一停利價": sig["tp1"],
-                "評分": sig["score"],
-                "理由": sig["reason"],
-            })
-
-    for symbol in symbols_us:
-        df = fetch_price_history(symbol, period=period)
-        df_map[symbol] = df
-        if not df.empty:
-            sig = calc_signal(df, stop_loss_pct, take_profit_pct)
-            results.append({
-                "市場": "美股",
-                "代碼": symbol,
-                "名稱": get_symbol_name(symbol),
-                "收盤": sig["close"],
-                "訊號": sig["signal"],
-                "建議進場價": sig["entry"],
-                "停損價": sig["stop"],
-                "第一停利價": sig["tp1"],
-                "評分": sig["score"],
-                "理由": sig["reason"],
-            })
-
-    scan_df = pd.DataFrame(results)
-    if not scan_df.empty:
-        scan_df = scan_df.sort_values(["評分", "市場"], ascending=[False, True]).reset_index(drop=True)
-
-    top3_df = scan_df.head(3).copy() if not scan_df.empty else pd.DataFrame()
-    order_df = make_order_df(top3_df, capital, alloc_pct) if not top3_df.empty else pd.DataFrame()
-
-    st.session_state["scan_df"] = scan_df
-    st.session_state["top3_df"] = top3_df
-    st.session_state["order_df"] = order_df
-    st.session_state["df_map"] = df_map
-
-
-def auto_refresh_script(seconds: int):
-    ms = max(int(seconds), 10) * 1000
-    components.html(
-        f"""
-        <script>
-            setTimeout(function() {{
-                window.parent.location.reload();
-            }}, {ms});
-        </script>
-        """,
-        height=0,
-    )
-
-
-# =========================
-# 初始化
-# =========================
-init_state()
-
-# =========================
-# 樣式
-# =========================
-st.markdown(
-    """
-    <style>
-    .block-container {
-        padding-top: 1rem;
-        padding-bottom: 4rem;
-        max-width: 1100px;
-    }
-    div[data-testid="stMetric"] {
-        background: rgba(240,242,246,0.55);
-        border-radius: 14px;
-        padding: 8px 10px;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
+df = st.data_editor(
+    st.session_state["positions"],
+    num_rows="dynamic",
+    use_container_width=True
 )
 
-# =========================
-# Sidebar
-# =========================
-st.sidebar.title("📱 上帝視角 設定")
-capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CAPITAL, step=10000)
-max_positions = st.sidebar.slider("同時持倉上限", 1, 5, DEFAULT_MAX_POSITIONS)
-single_position_pct = st.sidebar.slider("單檔上限 %", 10, 50, int(DEFAULT_SINGLE_POSITION_PCT * 100), step=5) / 100
-stop_loss_pct = st.sidebar.slider("固定停損 %", 2, 10, int(DEFAULT_STOP_LOSS_PCT * 100)) / 100
-take_profit_pct = st.sidebar.slider("第一停利 %", 5, 20, int(DEFAULT_TAKE_PROFIT_PCT * 100)) / 100
-daily_loss_stop_pct = st.sidebar.slider("當日停手機制 %", 2, 10, int(DEFAULT_DAILY_LOSS_STOP_PCT * 100)) / 100
-period = st.sidebar.selectbox("抓取區間", ["3mo", "6mo", "1y"], index=1)
+# 自動補
+if st.button("⚡ 自動補齊資訊"):
+    new_rows = []
+    for _, row in df.iterrows():
+        row = enrich_position(row)
+        new_rows.append(row)
 
-tw_symbols = parse_symbols(st.sidebar.text_area("台股清單", ",".join(TW_DEFAULTS), height=90))
-us_symbols = parse_symbols(st.sidebar.text_area("美股清單", ",".join(US_DEFAULTS), height=90))
-
-st.sidebar.markdown("---")
-auto_refresh = st.sidebar.toggle("啟用盤中自動刷新", value=st.session_state["auto_refresh"])
-refresh_seconds = st.sidebar.slider("刷新秒數", 10, 300, st.session_state["refresh_seconds"], step=10)
-st.session_state["auto_refresh"] = auto_refresh
-st.session_state["refresh_seconds"] = refresh_seconds
+    st.session_state["positions"] = pd.DataFrame(new_rows)
+    st.success("已更新")
+    st.rerun()
 
 # =========================
-# Header
+# 顯示
 # =========================
-st.title("📈 上帝視角")
-st.caption("手機版 / 自動刷新 / LINE 推播 / 國泰手動下單")
-
-h1, h2, h3, h4 = st.columns(4)
-h1.metric("總資金", f"{capital:,.0f}")
-h2.metric("持倉上限", f"{max_positions} 檔")
-h3.metric("單檔上限", f"{single_position_pct:.0%}")
-h4.metric("當日停手", f"{daily_loss_stop_pct:.0%}")
-
-info1, info2 = st.columns(2)
-with info1:
-    st.info(f"最後刷新時間：{now_str()}")
-with info2:
-    st.info(f"自動刷新：{'開啟' if auto_refresh else '關閉'} / {refresh_seconds} 秒")
-
-if st.button("🔍 立即重新掃描", type="primary", use_container_width=True):
-    run_scan(tw_symbols, us_symbols, period, stop_loss_pct, take_profit_pct, capital, single_position_pct)
-
-if st.session_state["scan_df"].empty:
-    run_scan(tw_symbols, us_symbols, period, stop_loss_pct, take_profit_pct, capital, single_position_pct)
-
-if auto_refresh:
-    auto_refresh_script(refresh_seconds)
-
-scan_df = st.session_state["scan_df"]
-top3_df = st.session_state["top3_df"]
-order_df = st.session_state["order_df"]
-df_map = st.session_state["df_map"]
-positions_live = update_position_prices(df_map)
+st.dataframe(st.session_state["positions"], use_container_width=True)
 
 # =========================
-# Tabs
+# LINE 推播
 # =========================
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "🎯 狙擊清單",
-    "📋 下單表",
-    "💼 持倉追蹤",
-    "🧾 交易紀錄",
-    "⚙️ 推播 / 設定"
-])
-
-with tab1:
-    st.subheader("明日 / 盤中實戰 3 檔")
-
-    if top3_df.empty:
-        st.warning("尚無可用結果")
-    else:
-        st.dataframe(top3_df, use_container_width=True, hide_index=True)
-
-        quick_cards = st.columns(min(3, len(top3_df)))
-        for i, (_, row) in enumerate(top3_df.iterrows()):
-            with quick_cards[i]:
-                st.markdown(f"**{row['代碼']}**")
-                st.caption(f"{row['名稱']}｜{row['市場']}｜{row['訊號']}")
-                st.write(f"進場：{row['建議進場價']}")
-                st.write(f"停損：{row['停損價']}")
-                st.write(f"停利：{row['第一停利價']}")
-
-        symbol = st.selectbox("查看圖表", options=top3_df["代碼"].tolist())
-        draw_chart_no_plotly(df_map.get(symbol, pd.DataFrame()), symbol)
-
-        st.subheader("完整排行")
-        st.dataframe(scan_df, use_container_width=True, hide_index=True)
-
-with tab2:
-    st.subheader("國泰手動下單表")
-
-    if order_df.empty:
-        st.warning("尚無下單表")
-    else:
-        st.dataframe(order_df, use_container_width=True, hide_index=True)
-        st.download_button(
-            "⬇️ 下載 CSV",
-            order_df.to_csv(index=False).encode("utf-8-sig"),
-            "god_view_orders.csv",
-            "text/csv"
-        )
-
-        st.markdown("**快速執行守則**")
-        st.markdown(
-            "- 不突破不買\n"
-            "- 弱於 5MA 不追\n"
-            "- 觸價前先確認量能\n"
-            "- 跌破停損不凹單"
-        )
-
-with tab3:
-    st.subheader("持倉追蹤面板")
-
-    pos_df = positions_live
-    edited_pos = st.data_editor(
-        pos_df,
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        key="positions_editor"
-    )
-
-    action1, action2 = st.columns(2)
-
-    with action1:
-        if st.button("💾 儲存持倉並補名稱", key="save_positions_btn", use_container_width=True):
-            cleaned = ensure_position_columns(edited_pos)
-            cleaned = enrich_positions_with_names(cleaned)
-            save_positions(cleaned.fillna("").to_dict("records"))
-            st.success("持倉已儲存，名稱已自動補齊")
-            st.rerun()
-
-    with action2:
-        if st.button("⚡ 即時掃描持倉", key="scan_positions_btn", use_container_width=True):
-            cleaned = ensure_position_columns(edited_pos)
-            cleaned = enrich_positions_with_names(cleaned)
-            save_positions(cleaned.fillna("").to_dict("records"))
-            scan_result = build_position_scan_df(cleaned, period, stop_loss_pct, take_profit_pct)
-            st.session_state["position_scan_df"] = scan_result
-            st.success("持倉即時掃描完成")
-            st.rerun()
-
-    if not edited_pos.empty:
-        valid_returns = pd.to_numeric(edited_pos["報酬率%"], errors="coerce")
-        avg_ret = valid_returns.mean() if valid_returns.notna().any() else 0
-
-        p1, p2 = st.columns(2)
-        p1.metric("持倉檔數", len(edited_pos))
-        p2.metric("平均報酬率%", f"{avg_ret:.2f}")
-
-    position_scan_df = st.session_state.get("position_scan_df", pd.DataFrame())
-    if not position_scan_df.empty:
-        st.subheader("持倉即時掃描結果")
-        st.dataframe(position_scan_df, use_container_width=True, hide_index=True)
-
-with tab4:
-    st.subheader("交易紀錄")
-    log_df = trade_log_df()
-
-    edited_log = st.data_editor(
-        log_df,
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        key="trade_log_editor"
-    )
-
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("💾 儲存交易紀錄", use_container_width=True):
-            save_trade_log(edited_log.fillna("").to_dict("records"))
-            st.success("交易紀錄已儲存")
-
-    with c2:
-        if not edited_log.empty:
-            st.download_button(
-                "⬇️ 匯出交易紀錄 CSV",
-                edited_log.to_csv(index=False).encode("utf-8-sig"),
-                "god_view_trade_log.csv",
-                "text/csv",
-                use_container_width=True
-            )
-
-with tab5:
-    st.subheader("LINE 推播 / 風控摘要")
-    alert_text = build_alert_text(top3_df)
-    st.code(alert_text)
-
-    x1, x2 = st.columns(2)
-    with x1:
-        if st.button("發送 LINE 訊號", use_container_width=True):
-            ok, msg = send_line(alert_text)
-            if ok:
-                st.success(msg)
-                st.session_state["last_alert_text"] = alert_text
-            else:
-                st.error(msg)
-
-    with x2:
-        st.info("已設定 LINE secrets" if line_enabled() else "尚未設定 LINE secrets")
-
-    st.markdown("**上帝視角 穩定版功能**")
-    st.markdown(
-        "- 盤中自動刷新\n"
-        "- 無 Plotly 依賴\n"
-        "- 持倉代碼自動補名稱\n"
-        "- 持倉即時掃描按鈕\n"
-        "- 去除 Styler 相容性問題"
-    )
-
-    st.markdown("**注意**")
-    st.markdown(
-        "- 本版仍為國泰手動下單流程\n"
-        "- 自動刷新是頁面重整型，不是券商自動下單\n"
-        "- LINE 若顯示未設定，代表 secrets 還沒填"
-    )
-
-st.markdown("---")
-st.caption("上帝視角：研究與決策輔助用途，不保證獲利。")
+if st.button("📲 發送LINE"):
+    st.warning("請先設定 secrets")

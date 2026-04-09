@@ -6,7 +6,7 @@ import requests
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="上帝視角 V10.5", page_icon="📈", layout="wide")
+st.set_page_config(page_title="上帝視角 V11", page_icon="📈", layout="wide")
 
 # =========================================================
 # 固定參數
@@ -126,30 +126,30 @@ def get_confidence_label(score: Optional[float]) -> str:
 def get_confidence_color(score: Optional[float]) -> str:
     score = safe_float(score)
     if score is None:
-        return "#64748b"
+        return "#6b7280"
     if score >= 90:
-        return "#22c55e"
+        return "#16a34a"
     if score >= 75:
-        return "#10b981"
+        return "#22c55e"
     if score >= 60:
-        return "#eab308"
+        return "#d4af37"
     if score >= 45:
-        return "#f97316"
+        return "#f59e0b"
     return "#ef4444"
 
 
 # =========================================================
-# 深色中文專業介面
+# 黑金介面
 # =========================================================
 st.markdown(
     """
     <style>
     .stApp {
         background:
-            radial-gradient(circle at top left, rgba(56,189,248,.08), transparent 24%),
-            radial-gradient(circle at top right, rgba(99,102,241,.07), transparent 22%),
-            linear-gradient(180deg, #07101d 0%, #0b1423 45%, #0f172a 100%);
-        color: #e5edf7;
+            radial-gradient(circle at top left, rgba(212,175,55,.09), transparent 25%),
+            radial-gradient(circle at top right, rgba(180,140,30,.08), transparent 22%),
+            linear-gradient(180deg, #050505 0%, #0b0b0b 45%, #111111 100%);
+        color: #f5f0df;
     }
 
     .block-container {
@@ -159,61 +159,61 @@ st.markdown(
     }
 
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0a1220 0%, #10192b 100%);
-        border-right: 1px solid rgba(148,163,184,.14);
+        background: linear-gradient(180deg, #0a0a0a 0%, #111111 100%);
+        border-right: 1px solid rgba(212,175,55,.18);
     }
 
     [data-testid="stSidebar"] * {
-        color: #e5edf7 !important;
+        color: #f4ead0 !important;
     }
 
     div[data-testid="stMetric"] {
-        background: linear-gradient(180deg, rgba(13,23,39,.96), rgba(17,24,39,.96));
-        border: 1px solid rgba(125,211,252,.10);
+        background: linear-gradient(180deg, rgba(18,18,18,.96), rgba(24,24,24,.96));
+        border: 1px solid rgba(212,175,55,.18);
         border-radius: 18px;
         padding: 12px 14px;
-        box-shadow: 0 10px 24px rgba(2,6,23,.28);
+        box-shadow: 0 10px 24px rgba(0,0,0,.35);
     }
 
     .hero-card {
-        background: linear-gradient(135deg, rgba(10,18,32,.96), rgba(16,25,43,.96));
-        border: 1px solid rgba(96,165,250,.16);
+        background: linear-gradient(135deg, rgba(12,12,12,.98), rgba(24,20,10,.96));
+        border: 1px solid rgba(212,175,55,.22);
         border-radius: 24px;
         padding: 20px 20px 16px 20px;
-        box-shadow: 0 18px 36px rgba(2,6,23,.33);
+        box-shadow: 0 18px 36px rgba(0,0,0,.42);
         margin-bottom: 10px;
     }
 
     .title-xl {
-        font-size: 1.22rem;
+        font-size: 1.24rem;
         font-weight: 900;
-        color: #f8fbff;
+        color: #f8f2df;
         margin-bottom: 6px;
         letter-spacing: .2px;
     }
 
     .muted {
-        color: #9fb0c5;
+        color: #c8b88a;
         font-size: .92rem;
     }
 
     .soft-box {
-        background: linear-gradient(180deg, rgba(22,33,53,.95), rgba(12,22,38,.95));
-        border: 1px solid rgba(96,165,250,.14);
+        background: linear-gradient(180deg, rgba(28,24,16,.96), rgba(18,18,18,.96));
+        border: 1px solid rgba(212,175,55,.18);
         border-radius: 16px;
         padding: 14px 16px;
         margin-bottom: 10px;
-        color: #e2ebf5;
-        box-shadow: 0 8px 18px rgba(2,6,23,.24);
+        color: #f2ead6;
+        box-shadow: 0 8px 18px rgba(0,0,0,.30);
     }
 
     .signal-card {
-        background: linear-gradient(145deg, rgba(12,20,34,.98), rgba(17,24,39,.98));
-        border: 1px solid rgba(125,211,252,.10);
+        background: linear-gradient(145deg, rgba(16,16,16,.98), rgba(24,20,10,.98));
+        border: 1px solid rgba(212,175,55,.16);
         border-radius: 22px;
         padding: 18px;
         min-height: 360px;
-        box-shadow: 0 14px 26px rgba(2,6,23,.32);
+        box-shadow: 0 14px 26px rgba(0,0,0,.34);
     }
 
     .badge {
@@ -229,7 +229,7 @@ st.markdown(
     .kpi {
         font-size: 1.18rem;
         font-weight: 800;
-        color: #f8fafc;
+        color: #fff4d6;
         margin: 6px 0;
     }
 
@@ -237,10 +237,10 @@ st.markdown(
         border-radius: 15px !important;
         height: 3.1rem !important;
         font-weight: 900 !important;
-        background: linear-gradient(90deg, #1d4ed8, #2563eb) !important;
+        background: linear-gradient(90deg, #8b6b16, #d4af37) !important;
         border: none !important;
-        color: white !important;
-        box-shadow: 0 10px 20px rgba(37,99,235,.25) !important;
+        color: #111 !important;
+        box-shadow: 0 10px 20px rgba(212,175,55,.25) !important;
     }
 
     .stTabs [data-baseweb="tab-list"] {
@@ -250,29 +250,29 @@ st.markdown(
     .stTabs [data-baseweb="tab"] {
         border-radius: 12px;
         padding: 10px 14px;
-        background: rgba(13,23,39,.92);
-        border: 1px solid rgba(148,163,184,.10);
-        color: #cdd7e5;
+        background: rgba(20,20,20,.96);
+        border: 1px solid rgba(212,175,55,.10);
+        color: #e9ddbd;
     }
 
     .stTabs [aria-selected="true"] {
-        background: linear-gradient(90deg, rgba(29,78,216,.22), rgba(59,130,246,.18)) !important;
-        border: 1px solid rgba(96,165,250,.24) !important;
-        color: #f8fafc !important;
+        background: linear-gradient(90deg, rgba(139,107,22,.30), rgba(212,175,55,.22)) !important;
+        border: 1px solid rgba(212,175,55,.24) !important;
+        color: #fff6df !important;
     }
 
     div[data-testid="stDataFrame"] {
-        border: 1px solid rgba(148,163,184,.10);
+        border: 1px solid rgba(212,175,55,.10);
         border-radius: 16px;
         overflow: hidden;
-        box-shadow: 0 10px 18px rgba(2,6,23,.20);
+        box-shadow: 0 10px 18px rgba(0,0,0,.22);
     }
 
     .stTextInput input, .stTextArea textarea, .stNumberInput input {
-        background: rgba(14,22,36,.95) !important;
-        color: #e5edf7 !important;
+        background: rgba(15,15,15,.98) !important;
+        color: #f4ead0 !important;
         border-radius: 12px !important;
-        border: 1px solid rgba(148,163,184,.14) !important;
+        border: 1px solid rgba(212,175,55,.14) !important;
     }
     </style>
     """,
@@ -318,9 +318,17 @@ def fetch_twse_stock_day_all() -> pd.DataFrame:
 @st.cache_data(ttl=120)
 def get_twse_name_map() -> Dict[str, str]:
     df = fetch_twse_stock_day_all()
-    if df.empty or "代碼" not in df.columns or "股名" not in df.columns:
+    if df.empty:
         return {}
-    return dict(zip(df["代碼"].astype(str), df["股名"].astype(str)))
+    if "代碼" not in df.columns or "股名" not in df.columns:
+        return {}
+    name_map = {}
+    for _, row in df.iterrows():
+        code = clean_text(row.get("代碼"))
+        name = clean_text(row.get("股名"))
+        if code and name:
+            name_map[code] = name
+    return name_map
 
 
 @st.cache_data(ttl=180)
@@ -346,8 +354,14 @@ def get_yf_info(symbol: str) -> Dict[str, object]:
 def get_display_name(symbol: str) -> str:
     code = to_tw_code(symbol)
     tw_map = get_twse_name_map()
-    if code in tw_map and clean_text(tw_map[code]):
-        return clean_text(tw_map[code])
+
+    # 強制優先 TWSE 中文名稱
+    if code in tw_map:
+        name = clean_text(tw_map[code])
+        if name:
+            return name
+
+    # fallback
     return clean_text(get_yf_info(symbol).get("股名", code))
 
 
@@ -375,7 +389,6 @@ def fetch_price_history(symbol: str, period: str = "6mo") -> pd.DataFrame:
         df["Prev20High"] = df["High"].rolling(20).max().shift(1)
         df["Prev20Low"] = df["Low"].rolling(20).min().shift(1)
         df["Ret1D%"] = df["Close"].pct_change() * 100
-        df["Ret5D%"] = df["Close"].pct_change(5) * 100
         df["VolumeRatio"] = df["Volume"] / df["VOL20"].replace(0, pd.NA)
         return df.dropna(how="all")
     except Exception:
@@ -665,7 +678,7 @@ def build_weekly_summary(order_df: pd.DataFrame, capital: float) -> Dict[str, ob
     }
 
 
-def run_auto_market_scan_v10_5(capital: float):
+def run_auto_market_scan_v11(capital: float):
     candidate_pool = build_dynamic_tw_scan_pool()
     results = []
 
@@ -825,7 +838,7 @@ def send_line(text: str) -> Tuple[bool, str]:
 
 
 def build_priority_alerts(top3_df: pd.DataFrame, weekly_summary: Dict[str, object], verdict_title: str) -> str:
-    lines = [f"上帝視角 V10.5 推薦 {now_str()}"]
+    lines = [f"上帝視角 V11 推薦 {now_str()}"]
     lines.append(f"今日判斷：{verdict_title}")
 
     if pd.DataFrame(top3_df).empty:
@@ -867,7 +880,7 @@ init_state()
 # =========================================================
 # Sidebar
 # =========================================================
-st.sidebar.title("📊 上帝視角 V10.5 設定")
+st.sidebar.title("👑 上帝視角 V11 設定")
 capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CAPITAL, step=10000)
 
 # =========================================================
@@ -876,21 +889,21 @@ capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CA
 st.markdown(
     """
     <div class="hero-card">
-        <div class="title-xl">🌙 上帝視角 V10.5 台股實戰中文專業版</div>
-        <div class="muted">台股顯示 TWSE 中文名稱｜配色再優化｜加入今日是否適合開新倉判斷</div>
+        <div class="title-xl">👑 上帝視角 V11 黑金專業版</div>
+        <div class="muted">台股股名優先使用 TWSE 中文名稱｜黑金風格介面｜今日是否適合開新倉判斷</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
+
+if st.session_state["top3_df"].empty:
+    run_auto_market_scan_v11(capital)
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("總資金", f"{capital:,.0f}")
 m2.metric("固定停損", f"{int(FIXED_STOP_LOSS_PCT * 100)}%")
 m3.metric("第一停利", f"{int(FIXED_TAKE_PROFIT_PCT * 100)}%")
 m4.metric("推薦檔數", f"{FIXED_MAX_RECOMMEND} 檔")
-
-if st.session_state["top3_df"].empty:
-    run_auto_market_scan_v10_5(capital)
 
 i1, i2, i3 = st.columns(3)
 with i1:
@@ -899,14 +912,14 @@ with i2:
     st.markdown(f'<div class="soft-box"><b>盤面狀態</b><br>{st.session_state.get("market_state", "資料不足")}</div>', unsafe_allow_html=True)
 with i3:
     st.markdown(
-        f'<div class="soft-box"><b>今日判斷</b><br>{st.session_state.get("verdict_title", "資料不足")}<br><span style="color:#9fb0c5;">{st.session_state.get("verdict_text", "")}</span></div>',
+        f'<div class="soft-box"><b>今日判斷</b><br>{st.session_state.get("verdict_title", "資料不足")}<br><span style="color:#c8b88a;">{st.session_state.get("verdict_text", "")}</span></div>',
         unsafe_allow_html=True,
     )
 
 with st.container():
     st.markdown('<div class="top-btn">', unsafe_allow_html=True)
     if st.button("🚀 依總資金重新推薦本週標的", use_container_width=True):
-        run_auto_market_scan_v10_5(capital)
+        run_auto_market_scan_v11(capital)
     st.markdown("</div>", unsafe_allow_html=True)
 
 scan_df = as_object_df(st.session_state["scan_df"])
@@ -943,9 +956,9 @@ with tab1:
                         <div class="title-xl">{clean_text(row.get("代碼"))}｜{clean_text(row.get("股名"))}</div>
                         <div class="muted">{clean_text(row.get("族群"))}｜{clean_text(row.get("等級"))}</div>
                         <div style="margin-top:10px;">
-                            <span class="badge" style="background:{color};color:white;">信心 {clean_text(row.get("信心"))}</span>
-                            <span class="badge" style="background:#16233a;color:#93c5fd;">{clean_text(row.get("訊號"))}</span>
-                            <span class="badge" style="background:#0f172a;color:#d7e3f0;">評分 {clean_text(row.get("評分"))}</span>
+                            <span class="badge" style="background:{color};color:#111;">信心 {clean_text(row.get("信心"))}</span>
+                            <span class="badge" style="background:#2a2313;color:#f6e7b0;">{clean_text(row.get("訊號"))}</span>
+                            <span class="badge" style="background:#151515;color:#f1e7c8;">評分 {clean_text(row.get("評分"))}</span>
                         </div>
                         <div class="kpi">建議進場：{clean_text(row.get("建議進場價")) or "-"}</div>
                         <div>停損：{clean_text(row.get("停損價")) or "-"}</div>
@@ -976,7 +989,7 @@ with tab2:
         st.download_button(
             "⬇️ 下載下單表 CSV",
             order_df.to_csv(index=False).encode("utf-8-sig"),
-            "god_view_v10_5_orders.csv",
+            "god_view_v11_orders.csv",
             "text/csv"
         )
 
@@ -1031,4 +1044,4 @@ with tab4:
             st.error(msg)
 
 st.markdown("---")
-st.caption("上帝視角 V10.5｜台股中文股名 + 介面配色優化 + 開新倉判斷版")
+st.caption("上帝視角 V11｜黑金專業版｜中文股名強制優先顯示")

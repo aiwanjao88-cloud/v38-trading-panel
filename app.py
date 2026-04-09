@@ -6,16 +6,15 @@ import requests
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="上帝視角 V10.2", page_icon="📈", layout="wide")
+st.set_page_config(page_title="上帝視角 V10.3", page_icon="📈", layout="wide")
 
 # =========================================================
-# 固定策略參數（側欄不顯示）
+# 固定參數
 # =========================================================
 DEFAULT_CAPITAL = 200000
 FIXED_STOP_LOSS_PCT = 0.05
 FIXED_TAKE_PROFIT_PCT = 0.10
 FIXED_MAX_RECOMMEND = 3
-FIXED_REFRESH_SECONDS = 60
 
 TWSE_STOCK_DAY_ALL_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
 
@@ -38,7 +37,7 @@ SECTOR_BUCKETS = {
 
 
 # =========================================================
-# 基本工具
+# 工具函式
 # =========================================================
 def now_str() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -89,6 +88,13 @@ def clean_text(x) -> str:
     return str(x).strip()
 
 
+def as_object_df(df: pd.DataFrame) -> pd.DataFrame:
+    out = pd.DataFrame(df).copy()
+    for col in out.columns:
+        out[col] = out[col].astype("object")
+    return out
+
+
 def get_sector_for_symbol(symbol: str) -> str:
     code = to_tw_code(symbol)
     for sector, members in SECTOR_BUCKETS.items():
@@ -128,7 +134,7 @@ def get_confidence_color(score: Optional[float]) -> str:
 
 
 # =========================================================
-# 深色專業介面
+# 深色介面
 # =========================================================
 st.markdown(
     """
@@ -270,7 +276,7 @@ st.markdown(
 
 
 # =========================================================
-# 市場資料
+# 資料
 # =========================================================
 @st.cache_data(ttl=120)
 def fetch_twse_stock_day_all() -> pd.DataFrame:
@@ -355,8 +361,18 @@ def fetch_price_history(symbol: str, period: str = "6mo") -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def rsi(series: pd.Series, period: int = 14) -> pd.Series:
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, pd.NA)
+    return (100 - (100 / (1 + rs))).fillna(0)
+
+
 # =========================================================
-# 掃描與推薦
+# 掃描評分
 # =========================================================
 def calc_score(symbol: str, stop_loss_pct: float, take_profit_pct: float) -> Dict[str, object]:
     info = get_yf_info(symbol)
@@ -591,11 +607,7 @@ def build_order_df(top_df: pd.DataFrame, capital: float, market_state: str) -> p
 
 def build_weekly_summary(order_df: pd.DataFrame, capital: float) -> Dict[str, object]:
     if pd.DataFrame(order_df).empty:
-        return {
-            "預估週總收益": 0,
-            "預估週收益率%": 0,
-            "總建議投入": 0,
-        }
+        return {"預估週總收益": 0, "預估週收益率%": 0, "總建議投入": 0}
 
     df = pd.DataFrame(order_df).copy()
     df["預估單筆收益_num"] = pd.to_numeric(df["預估單筆收益"], errors="coerce").fillna(0)
@@ -612,7 +624,7 @@ def build_weekly_summary(order_df: pd.DataFrame, capital: float) -> Dict[str, ob
     }
 
 
-def run_auto_market_scan_v10_2(capital: float):
+def run_auto_market_scan_v10_3(capital: float):
     candidate_pool = build_dynamic_tw_scan_pool()
     results = []
 
@@ -636,7 +648,9 @@ def run_auto_market_scan_v10_2(capital: float):
     sector_df = build_sector_rotation_df(scan_df)
     strength_map = get_sector_strength_map(scan_df)
 
-    scan_df["族群強度加分"] = scan_df["族群"].apply(lambda x: round((strength_map.get(x, 0) - 30) / 5, 2) if strength_map.get(x, 0) else 0)
+    scan_df["族群強度加分"] = scan_df["族群"].apply(
+        lambda x: round((strength_map.get(x, 0) - 30) / 5, 2) if strength_map.get(x, 0) else 0
+    )
     scan_df["評分_num"] = pd.to_numeric(scan_df["評分"], errors="coerce").fillna(-999)
     scan_df["風險報酬比_num"] = pd.to_numeric(scan_df["風險報酬比"], errors="coerce").fillna(0)
     scan_df["最終排序"] = scan_df["評分_num"] + scan_df["族群強度加分"] + (scan_df["風險報酬比_num"] * 3)
@@ -657,8 +671,14 @@ def run_auto_market_scan_v10_2(capital: float):
 
 
 # =========================================================
-# 持倉 / 推播
+# 持股與推播
 # =========================================================
+POSITION_COLUMNS = [
+    "市場", "代碼", "股名", "持有數量", "成本價", "目前價", "報酬率%",
+    "停損價", "第一停利價", "狀態"
+]
+
+
 def ensure_position_columns(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(df).copy()
     for col in POSITION_COLUMNS:
@@ -753,10 +773,7 @@ def send_line(text: str) -> Tuple[bool, str]:
         "Authorization": f"Bearer {st.secrets['line_channel_access_token']}",
         "Content-Type": "application/json",
     }
-    payload = {
-        "to": st.secrets["line_to"],
-        "messages": [{"type": "text", "text": text[:5000]}],
-    }
+    payload = {"to": st.secrets["line_to"], "messages": [{"type": "text", "text": text[:5000]}]}
 
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=20)
@@ -768,7 +785,7 @@ def send_line(text: str) -> Tuple[bool, str]:
 
 
 def build_priority_alerts(top3_df: pd.DataFrame, weekly_summary: Dict[str, object]) -> str:
-    lines = [f"上帝視角 V10.2 推薦 {now_str()}"]
+    lines = [f"上帝視角 V10.3 推薦 {now_str()}"]
     if pd.DataFrame(top3_df).empty:
         lines.append("目前尚無推薦標的。")
         return "\n".join(lines)
@@ -787,20 +804,6 @@ def build_priority_alerts(top3_df: pd.DataFrame, weekly_summary: Dict[str, objec
     return "\n".join(lines)
 
 
-def auto_refresh_script(seconds: int):
-    ms = max(int(seconds), 10) * 1000
-    components.html(
-        f"""
-        <script>
-            setTimeout(function() {{
-                window.parent.location.reload();
-            }}, {ms});
-        </script>
-        """,
-        height=0,
-    )
-
-
 # =========================================================
 # Session 初始化
 # =========================================================
@@ -813,15 +816,14 @@ def init_state():
     st.session_state.setdefault("position_scan_df", pd.DataFrame())
     st.session_state.setdefault("market_state", "資料不足")
     st.session_state.setdefault("sector_df", pd.DataFrame())
-    st.session_state.setdefault("auto_refresh", False)
 
 
 init_state()
 
 # =========================================================
-# Sidebar：只保留總資金
+# Sidebar（只保留總資金）
 # =========================================================
-st.sidebar.title("📊 上帝視角 V10.2 設定")
+st.sidebar.title("📊 上帝視角 V10.3 設定")
 capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CAPITAL, step=10000)
 
 # =========================================================
@@ -830,8 +832,8 @@ capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CA
 st.markdown(
     """
     <div class="hero-card">
-        <div class="title-xl">🌙 上帝視角 V10.2 簡化實戰版</div>
-        <div class="muted">側欄只保留總資金，系統自動依資金推薦三檔、開盤進場區、下單張數與預估週收益</div>
+        <div class="title-xl">🌙 上帝視角 V10.3 修正版</div>
+        <div class="muted">已修正 as_object_df 缺漏｜依總資金自動推薦三檔、開盤區間、張數、預估週收益</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -847,18 +849,18 @@ i1, i2, i3 = st.columns(3)
 with i1:
     st.markdown(f'<div class="soft-box"><b>最後刷新時間</b><br>{now_str()}</div>', unsafe_allow_html=True)
 with i2:
-    st.markdown(f'<div class="soft-box"><b>模式</b><br>開盤進出場試算</div>', unsafe_allow_html=True)
+    st.markdown('<div class="soft-box"><b>模式</b><br>開盤進出場試算</div>', unsafe_allow_html=True)
 with i3:
     st.markdown(f'<div class="soft-box"><b>盤面狀態</b><br>{st.session_state.get("market_state", "資料不足")}</div>', unsafe_allow_html=True)
 
 with st.container():
     st.markdown('<div class="top-btn">', unsafe_allow_html=True)
     if st.button("🚀 依總資金重新推薦本週標的", use_container_width=True):
-        run_auto_market_scan_v10_2(capital)
+        run_auto_market_scan_v10_3(capital)
     st.markdown("</div>", unsafe_allow_html=True)
 
 if st.session_state["top3_df"].empty:
-    run_auto_market_scan_v10_2(capital)
+    run_auto_market_scan_v10_3(capital)
 
 scan_df = as_object_df(st.session_state["scan_df"])
 top3_df = as_object_df(st.session_state["top3_df"])
@@ -925,7 +927,7 @@ with tab2:
         st.download_button(
             "⬇️ 下載下單表 CSV",
             order_df.to_csv(index=False).encode("utf-8-sig"),
-            "god_view_v10_2_orders.csv",
+            "god_view_v10_3_orders.csv",
             "text/csv"
         )
 
@@ -980,4 +982,4 @@ with tab4:
             st.error(msg)
 
 st.markdown("---")
-st.caption("上帝視角 V10.2 簡化實戰版｜側欄僅保留總資金，系統自動換算開盤進出場與下單張數")
+st.caption("上帝視角 V10.3 修正版｜已修正 as_object_df 缺漏問題")

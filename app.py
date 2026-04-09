@@ -738,7 +738,7 @@ with tab3:
     if not position_scan_df.empty:
         st.subheader("持倉即時掃描結果")
         st.dataframe(
-            position_scan_df.style.applymap(highlight_signal, subset=["訊號"]),
+            position_scan_df.style.map(highlight_signal, subset=["訊號"]),
             use_container_width=True,
             hide_index=True,
         )

@@ -6,7 +6,7 @@ import requests
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="上帝視角 V16", page_icon="👑", layout="wide")
+st.set_page_config(page_title="上帝視角 V16.1", page_icon="👑", layout="wide")
 
 # =========================================================
 # 固定參數
@@ -139,7 +139,7 @@ def get_confidence_color(score: Optional[float]) -> str:
 
 
 # =========================================================
-# 黑金旗艦介面
+# 黑金高辨識介面
 # =========================================================
 st.markdown(
     """
@@ -160,7 +160,7 @@ st.markdown(
 
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #0a0a0a 0%, #111111 100%);
-        border-right: 1px solid rgba(212,175,55,.18);
+        border-right: 1px solid rgba(212,175,55,.20);
     }
 
     [data-testid="stSidebar"] * {
@@ -169,18 +169,18 @@ st.markdown(
 
     div[data-testid="stMetric"] {
         background: linear-gradient(180deg, rgba(18,18,18,.96), rgba(24,24,24,.96));
-        border: 1px solid rgba(212,175,55,.18);
+        border: 1px solid rgba(212,175,55,.20);
         border-radius: 18px;
         padding: 12px 14px;
-        box-shadow: 0 10px 24px rgba(0,0,0,.35);
+        box-shadow: 0 10px 24px rgba(0,0,0,.38);
     }
 
     .hero-card {
         background: linear-gradient(135deg, rgba(12,12,12,.98), rgba(24,20,10,.96));
-        border: 1px solid rgba(212,175,55,.22);
+        border: 1px solid rgba(212,175,55,.24);
         border-radius: 24px;
         padding: 20px 20px 16px 20px;
-        box-shadow: 0 18px 36px rgba(0,0,0,.42);
+        box-shadow: 0 18px 36px rgba(0,0,0,.45);
         margin-bottom: 10px;
     }
 
@@ -199,21 +199,21 @@ st.markdown(
 
     .soft-box {
         background: linear-gradient(180deg, rgba(28,24,16,.96), rgba(18,18,18,.96));
-        border: 1px solid rgba(212,175,55,.18);
+        border: 1px solid rgba(212,175,55,.20);
         border-radius: 16px;
         padding: 14px 16px;
         margin-bottom: 10px;
         color: #f2ead6;
-        box-shadow: 0 8px 18px rgba(0,0,0,.30);
+        box-shadow: 0 8px 18px rgba(0,0,0,.32);
     }
 
     .signal-card {
         background: linear-gradient(145deg, rgba(16,16,16,.98), rgba(24,20,10,.98));
-        border: 1px solid rgba(212,175,55,.16);
+        border: 1px solid rgba(212,175,55,.20);
         border-radius: 22px;
         padding: 18px;
         min-height: 390px;
-        box-shadow: 0 14px 26px rgba(0,0,0,.34);
+        box-shadow: 0 14px 26px rgba(0,0,0,.36);
     }
 
     .badge {
@@ -234,45 +234,69 @@ st.markdown(
     }
 
     .top-btn button {
-        border-radius: 15px !important;
-        height: 3.1rem !important;
+        border-radius: 16px !important;
+        height: 3.35rem !important;
         font-weight: 900 !important;
-        background: linear-gradient(90deg, #8b6b16, #d4af37) !important;
-        border: none !important;
+        font-size: 1rem !important;
+        background: linear-gradient(90deg, #7a5a08, #d4af37) !important;
+        border: 1px solid rgba(255, 231, 170, .45) !important;
         color: #111 !important;
-        box-shadow: 0 10px 20px rgba(212,175,55,.25) !important;
+        box-shadow: 0 12px 24px rgba(212,175,55,.33) !important;
+    }
+
+    .holdings-btn button {
+        border-radius: 14px !important;
+        height: 3rem !important;
+        font-weight: 900 !important;
+        font-size: .95rem !important;
+        background: linear-gradient(90deg, #2b2110, #4a3412) !important;
+        border: 1px solid rgba(212,175,55,.35) !important;
+        color: #f7e7b0 !important;
+        box-shadow: 0 10px 18px rgba(0,0,0,.30) !important;
+    }
+
+    .line-btn button {
+        border-radius: 14px !important;
+        height: 3rem !important;
+        font-weight: 900 !important;
+        font-size: .95rem !important;
+        background: linear-gradient(90deg, #0b5d3a, #16a34a) !important;
+        border: 1px solid rgba(134,239,172,.35) !important;
+        color: #effdf5 !important;
+        box-shadow: 0 10px 18px rgba(22,163,74,.25) !important;
     }
 
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
+        gap: 10px;
     }
 
     .stTabs [data-baseweb="tab"] {
-        border-radius: 12px;
-        padding: 10px 14px;
-        background: rgba(20,20,20,.96);
-        border: 1px solid rgba(212,175,55,.10);
+        border-radius: 14px;
+        padding: 10px 16px;
+        background: rgba(20,20,20,.98);
+        border: 1px solid rgba(212,175,55,.12);
         color: #e9ddbd;
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,.02);
     }
 
     .stTabs [aria-selected="true"] {
-        background: linear-gradient(90deg, rgba(139,107,22,.30), rgba(212,175,55,.22)) !important;
-        border: 1px solid rgba(212,175,55,.24) !important;
+        background: linear-gradient(90deg, rgba(139,107,22,.35), rgba(212,175,55,.24)) !important;
+        border: 1px solid rgba(212,175,55,.30) !important;
         color: #fff6df !important;
     }
 
     div[data-testid="stDataFrame"] {
-        border: 1px solid rgba(212,175,55,.10);
+        border: 1px solid rgba(212,175,55,.12);
         border-radius: 16px;
         overflow: hidden;
-        box-shadow: 0 10px 18px rgba(0,0,0,.22);
+        box-shadow: 0 10px 18px rgba(0,0,0,.24);
     }
 
     .stTextInput input, .stTextArea textarea, .stNumberInput input {
         background: rgba(15,15,15,.98) !important;
         color: #f4ead0 !important;
         border-radius: 12px !important;
-        border: 1px solid rgba(212,175,55,.14) !important;
+        border: 1px solid rgba(212,175,55,.16) !important;
     }
     </style>
     """,
@@ -682,7 +706,7 @@ def build_weekly_summary(order_df: pd.DataFrame, capital: float) -> Dict[str, ob
     }
 
 
-def run_auto_market_scan_v16(capital: float):
+def run_auto_market_scan_v16_1(capital: float):
     candidate_pool = build_dynamic_tw_scan_pool()
     results = []
 
@@ -762,9 +786,9 @@ def enrich_positions_auto(df: pd.DataFrame) -> pd.DataFrame:
             continue
 
         info = get_yf_info(symbol)
-        out.at[idx, "市場"] = "台股"
-        out.at[idx, "代碼"] = to_tw_code(symbol)
-        out.at[idx, "股名"] = get_display_name(symbol)
+        out.at[idx, "市場"] = "台股" if not symbol.isalpha() else row.get("市場", "美股")
+        out.at[idx, "代碼"] = to_tw_code(symbol) if not symbol.isalpha() else symbol
+        out.at[idx, "股名"] = get_display_name(symbol) if not symbol.isalpha() else clean_text(info.get("股名", symbol))
         out.at[idx, "目前價"] = display_str(info.get("目前價"))
 
         current_price = safe_float(info.get("目前價"))
@@ -801,6 +825,21 @@ def build_position_scan_df(pos_df: pd.DataFrame) -> pd.DataFrame:
         if not symbol:
             continue
 
+        if symbol.isalpha():
+            info = get_yf_info(symbol)
+            rows.append({
+                "代碼": symbol,
+                "股名": clean_text(info.get("股名", symbol)),
+                "收盤": display_str(info.get("目前價")),
+                "訊號": "觀察",
+                "建議進場價": "",
+                "停損價": "",
+                "第一停利價": "",
+                "評分": "",
+                "理由": "美股暫以報價追蹤為主",
+            })
+            continue
+
         health = calc_score(symbol, FIXED_STOP_LOSS_PCT, FIXED_TAKE_PROFIT_PCT)
 
         rows.append({
@@ -815,7 +854,7 @@ def build_position_scan_df(pos_df: pd.DataFrame) -> pd.DataFrame:
             "理由": clean_text(health.get("理由", "")),
         })
 
-    return as_object_df(pd.DataFrame(rows).sort_values(["評分"], ascending=False).reset_index(drop=True))
+    return as_object_df(pd.DataFrame(rows).reset_index(drop=True))
 
 
 def line_enabled() -> bool:
@@ -843,7 +882,7 @@ def send_line(text: str) -> Tuple[bool, str]:
 
 
 def build_priority_alerts(top3_df: pd.DataFrame, weekly_summary: Dict[str, object], verdict_title: str) -> str:
-    lines = [f"上帝視角 V16 推薦 {now_str()}"]
+    lines = [f"上帝視角 V16.1 推薦 {now_str()}"]
     lines.append(f"今日判斷：{verdict_title}")
 
     if pd.DataFrame(top3_df).empty:
@@ -885,7 +924,7 @@ init_state()
 # =========================================================
 # Sidebar
 # =========================================================
-st.sidebar.title("👑 上帝視角 V16 設定")
+st.sidebar.title("👑 上帝視角 V16.1 設定")
 capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CAPITAL, step=10000)
 
 # =========================================================
@@ -894,15 +933,15 @@ capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CA
 st.markdown(
     """
     <div class="hero-card">
-        <div class="title-xl">👑 上帝視角 V16 黑金旗艦穩定版</div>
-        <div class="muted">已修正 position_scan_df 的 KeyError｜全 dict 改為安全 .get 模式｜黑金旗艦介面</div>
+        <div class="title-xl">👑 上帝視角 V16.1 黑金高辨識按鈕強化版</div>
+        <div class="muted">主動優化升級：主按鈕 / 持股按鈕 / LINE 按鈕強化辨識度，維持黑金旗艦風格</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 if st.session_state["top3_df"].empty:
-    run_auto_market_scan_v16(capital)
+    run_auto_market_scan_v16_1(capital)
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("總資金", f"{capital:,.0f}")
@@ -924,7 +963,7 @@ with i3:
 with st.container():
     st.markdown('<div class="top-btn">', unsafe_allow_html=True)
     if st.button("🚀 依總資金重新推薦本週標的", use_container_width=True):
-        run_auto_market_scan_v16(capital)
+        run_auto_market_scan_v16_1(capital)
     st.markdown("</div>", unsafe_allow_html=True)
 
 scan_df = as_object_df(st.session_state["scan_df"])
@@ -994,7 +1033,7 @@ with tab2:
         st.download_button(
             "⬇️ 下載下單表 CSV",
             order_df.to_csv(index=False).encode("utf-8-sig"),
-            "god_view_v16_orders.csv",
+            "god_view_v16_1_orders.csv",
             "text/csv"
         )
 
@@ -1011,14 +1050,17 @@ with tab3:
 
     c1, c2 = st.columns(2)
     with c1:
+        st.markdown('<div class="holdings-btn">', unsafe_allow_html=True)
         if st.button("⚡ 自動補齊持股資訊", use_container_width=True):
             safe_df = ensure_position_columns(pd.DataFrame(edited_pos))
             safe_df = enrich_positions_auto(safe_df)
             st.session_state["positions"] = safe_df.fillna("").to_dict("records")
             st.success("持股資訊已補齊")
             st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with c2:
+        st.markdown('<div class="holdings-btn">', unsafe_allow_html=True)
         if st.button("📡 掃描目前持股", use_container_width=True):
             safe_df = ensure_position_columns(pd.DataFrame(edited_pos))
             safe_df = enrich_positions_auto(safe_df)
@@ -1026,6 +1068,7 @@ with tab3:
             st.session_state["position_scan_df"] = build_position_scan_df(safe_df)
             st.success("持股掃描完成")
             st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
     latest_positions = positions_df()
     if not latest_positions.empty:
@@ -1041,12 +1084,14 @@ with tab4:
     line_text = build_priority_alerts(top3_df, weekly_summary, verdict_title)
     st.code(line_text)
 
+    st.markdown('<div class="line-btn">', unsafe_allow_html=True)
     if st.button("📲 發送本週推薦到 LINE", use_container_width=True):
         ok, msg = send_line(line_text)
         if ok:
             st.success(msg)
         else:
             st.error(msg)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown("---")
-st.caption("上帝視角 V16｜黑金旗艦穩定版｜已修正 KeyError: 理由")
+st.caption("上帝視角 V16.1｜黑金高辨識按鈕強化版｜主動優化升級")

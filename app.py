@@ -4,9 +4,10 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 import yfinance as yf
 
-st.set_page_config(page_title="上帝視角 V18", page_icon="👑", layout="wide")
+st.set_page_config(page_title="上帝視角 V19", page_icon="👑", layout="wide")
 
 # =========================================================
 # 固定參數
@@ -15,6 +16,7 @@ DEFAULT_CAPITAL = 200000
 FIXED_BASE_STOP_LOSS_PCT = 0.05
 FIXED_BASE_TAKE_PROFIT_PCT = 0.10
 FIXED_MAX_RECOMMEND = 3
+DEFAULT_REFRESH_SECONDS = 60
 BACKTEST_LOOKBACK_DAYS = 180
 BACKTEST_HOLD_DAYS = 7
 
@@ -140,8 +142,22 @@ def get_confidence_color(score: Optional[float]) -> str:
     return "#ef4444"
 
 
+def auto_refresh_script(seconds: int):
+    ms = max(int(seconds), 15) * 1000
+    components.html(
+        f"""
+        <script>
+            setTimeout(function() {{
+                window.parent.location.reload();
+            }}, {ms});
+        </script>
+        """,
+        height=0,
+    )
+
+
 # =========================================================
-# 黑金 UI
+# 黑金半自動操盤介面
 # =========================================================
 st.markdown(
     """
@@ -155,7 +171,7 @@ st.markdown(
     }
 
     .block-container {
-        max-width: 1320px;
+        max-width: 1380px;
         padding-top: 1.1rem;
         padding-bottom: 4rem;
     }
@@ -214,8 +230,17 @@ st.markdown(
         border: 1px solid rgba(212,175,55,.16);
         border-radius: 22px;
         padding: 18px;
-        min-height: 420px;
+        min-height: 430px;
         box-shadow: 0 14px 26px rgba(0,0,0,.34);
+    }
+
+    .exec-card {
+        background: linear-gradient(145deg, rgba(18,18,18,.98), rgba(32,24,8,.98));
+        border: 1px solid rgba(255,215,0,.22);
+        border-radius: 22px;
+        padding: 18px;
+        min-height: 320px;
+        box-shadow: 0 16px 30px rgba(0,0,0,.36);
     }
 
     .badge {
@@ -416,7 +441,6 @@ def fetch_price_history(symbol: str, period: str = "6mo") -> pd.DataFrame:
         df["Ret1D%"] = df["Close"].pct_change() * 100
         df["VolumeRatio"] = df["Volume"] / df["VOL20"].replace(0, pd.NA)
 
-        # V18 實戰版：簡易 ATR proxy
         df["TR1"] = (df["High"] - df["Low"]).abs()
         df["TR2"] = (df["High"] - df["Close"].shift(1)).abs()
         df["TR3"] = (df["Low"] - df["Close"].shift(1)).abs()
@@ -701,6 +725,14 @@ def build_opening_verdict(market_state: str, top3_df: pd.DataFrame) -> Tuple[str
     return "保守觀望", "先等盤中確認量價再決定是否進場"
 
 
+def build_risk_mode(market_state: str) -> str:
+    if market_state == "強勢盤":
+        return "進攻模式"
+    if market_state == "震盪盤":
+        return "中性模式"
+    return "防守模式"
+
+
 def recommend_qty(capital: float, weight: float, entry: Optional[float]) -> Tuple[float, int]:
     budget = capital * weight
     entry = safe_float(entry)
@@ -712,7 +744,12 @@ def recommend_qty(capital: float, weight: float, entry: Optional[float]) -> Tupl
 
 def build_order_df(top_df: pd.DataFrame, capital: float, market_state: str) -> pd.DataFrame:
     rows = []
-    weights = [0.4, 0.35, 0.25] if market_state == "強勢盤" else [0.35, 0.33, 0.32]
+    if market_state == "強勢盤":
+        weights = [0.4, 0.35, 0.25]
+    elif market_state == "震盪盤":
+        weights = [0.34, 0.33, 0.33]
+    else:
+        weights = [0.25, 0.25, 0.20]
 
     for idx, (_, row) in enumerate(pd.DataFrame(top_df).iterrows()):
         weight = weights[idx] if idx < len(weights) else 0.2
@@ -768,9 +805,6 @@ def build_weekly_summary(order_df: pd.DataFrame, capital: float) -> Dict[str, ob
     }
 
 
-# =========================================================
-# 回測
-# =========================================================
 def backtest_symbol(symbol: str) -> Tuple[pd.DataFrame, Dict[str, object]]:
     df = fetch_price_history(symbol, period="1y")
     if df.empty or len(df) < 80:
@@ -788,18 +822,17 @@ def backtest_symbol(symbol: str) -> Tuple[pd.DataFrame, Dict[str, object]]:
 
     for i in range(20, len(df) - BACKTEST_HOLD_DAYS):
         row = df.iloc[i]
-        close = safe_float(row["Close"])
-        ma5 = safe_float(row["MA5"])
-        ma20 = safe_float(row["MA20"])
-        ma60 = safe_float(row["MA60"])
-        rsi14 = safe_float(row["RSI14"])
-        prev20h = safe_float(row["Prev20High"])
-        high = safe_float(row["High"])
-        vol_ratio = safe_float(row["VolumeRatio"])
-        atr14 = safe_float(row["ATR14"])
+        close = safe_float(row.get("Close"))
+        ma5 = safe_float(row.get("MA5"))
+        ma20 = safe_float(row.get("MA20"))
+        ma60 = safe_float(row.get("MA60"))
+        rsi14 = safe_float(row.get("RSI14"))
+        prev20h = safe_float(row.get("Prev20High"))
+        vol_ratio = safe_float(row.get("VolumeRatio"))
+        atr14 = safe_float(row.get("ATR14"))
 
-        if not all(v is not None for v in [close, ma5, ma20, ma60, rsi14, prev20h, high]):
-            curve.append({"日期": row["Date"], "資金曲線": equity})
+        if not all(v is not None for v in [close, ma5, ma20, ma60, rsi14, prev20h]):
+            curve.append({"日期": row.get("Date"), "資金曲線": equity})
             continue
 
         signal = (close > ma5 > ma20 > ma60) and (close > prev20h) and (55 <= rsi14 <= 78)
@@ -813,9 +846,9 @@ def backtest_symbol(symbol: str) -> Tuple[pd.DataFrame, Dict[str, object]]:
 
             for j in range(i + 1, min(i + 1 + BACKTEST_HOLD_DAYS, len(df))):
                 nxt = df.iloc[j]
-                nxt_high = safe_float(nxt["High"])
-                nxt_low = safe_float(nxt["Low"])
-                nxt_close = safe_float(nxt["Close"])
+                nxt_high = safe_float(nxt.get("High"))
+                nxt_low = safe_float(nxt.get("Low"))
+                nxt_close = safe_float(nxt.get("Close"))
 
                 if nxt_low is not None and stop is not None and nxt_low <= stop:
                     exit_price = stop
@@ -823,14 +856,13 @@ def backtest_symbol(symbol: str) -> Tuple[pd.DataFrame, Dict[str, object]]:
                 if nxt_high is not None and tp1 is not None and nxt_high >= tp1:
                     exit_price = tp1
                     break
-
                 exit_price = nxt_close if nxt_close is not None else entry
 
             trade_ret = (exit_price - entry) / entry
             trade_returns.append(trade_ret)
             equity *= (1 + trade_ret)
 
-        curve.append({"日期": row["Date"], "資金曲線": equity})
+        curve.append({"日期": row.get("Date"), "資金曲線": equity})
 
     curve_df = pd.DataFrame(curve)
     if not trade_returns:
@@ -850,10 +882,7 @@ def backtest_symbol(symbol: str) -> Tuple[pd.DataFrame, Dict[str, object]]:
     return curve_df, stats
 
 
-# =========================================================
-# 主掃描
-# =========================================================
-def run_auto_market_scan_v18(capital: float):
+def run_auto_market_scan_v19(capital: float):
     candidate_pool = build_dynamic_tw_scan_pool()
     results = []
 
@@ -874,6 +903,7 @@ def run_auto_market_scan_v18(capital: float):
         st.session_state["sector_df"] = pd.DataFrame()
         st.session_state["verdict_title"] = "資料不足"
         st.session_state["verdict_text"] = "目前無法判斷"
+        st.session_state["risk_mode"] = "防守模式"
         return
 
     sector_df = build_sector_rotation_df(scan_df)
@@ -888,6 +918,7 @@ def run_auto_market_scan_v18(capital: float):
 
     scan_df = scan_df.sort_values(["最終排序", "評分_num"], ascending=False).reset_index(drop=True)
     market_state = build_market_state(scan_df)
+    risk_mode = build_risk_mode(market_state)
     top3_df = scan_df.head(FIXED_MAX_RECOMMEND).copy()
 
     order_df = build_order_df(top3_df, capital, market_state)
@@ -902,11 +933,9 @@ def run_auto_market_scan_v18(capital: float):
     st.session_state["sector_df"] = as_object_df(sector_df)
     st.session_state["verdict_title"] = verdict_title
     st.session_state["verdict_text"] = verdict_text
+    st.session_state["risk_mode"] = risk_mode
 
 
-# =========================================================
-# 持股 / 推播
-# =========================================================
 def ensure_position_columns(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(df).copy()
     for col in POSITION_COLUMNS:
@@ -1074,6 +1103,9 @@ def init_state():
     st.session_state.setdefault("sector_df", pd.DataFrame())
     st.session_state.setdefault("verdict_title", "資料不足")
     st.session_state.setdefault("verdict_text", "目前無法判斷")
+    st.session_state.setdefault("risk_mode", "防守模式")
+    st.session_state.setdefault("auto_refresh", False)
+    st.session_state.setdefault("refresh_seconds", DEFAULT_REFRESH_SECONDS)
 
 
 init_state()
@@ -1081,8 +1113,18 @@ init_state()
 # =========================================================
 # Sidebar
 # =========================================================
-st.sidebar.title("👑 上帝視角 V18 設定")
+st.sidebar.title("👑 上帝視角 V19 設定")
 capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CAPITAL, step=10000)
+
+st.sidebar.markdown("---")
+auto_refresh = st.sidebar.toggle("盤中自動刷新", value=st.session_state["auto_refresh"])
+refresh_seconds = st.sidebar.selectbox("刷新秒數", [30, 60, 120, 300], index=1)
+
+st.session_state["auto_refresh"] = auto_refresh
+st.session_state["refresh_seconds"] = refresh_seconds
+
+if st.session_state["auto_refresh"]:
+    auto_refresh_script(st.session_state["refresh_seconds"])
 
 # =========================================================
 # Header
@@ -1090,37 +1132,34 @@ capital = st.sidebar.number_input("總資金", min_value=10000, value=DEFAULT_CA
 st.markdown(
     """
     <div class="hero-card">
-        <div class="title-xl">👑 上帝視角 V18 實戰版</div>
-        <div class="muted">AI 動態停損 / 持股掃描 / 回測績效 / 週曲線 / LINE 推播 一體化</div>
+        <div class="title-xl">👑 上帝視角 V19 半自動操盤版</div>
+        <div class="muted">盤中自動刷新｜風險模式自動切換｜下單前最後確認面板｜持股掃描｜回測績效</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 if st.session_state["top3_df"].empty:
-    run_auto_market_scan_v18(capital)
+    run_auto_market_scan_v19(capital)
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("總資金", f"{capital:,.0f}")
-m2.metric("基準停損", f"{int(FIXED_BASE_STOP_LOSS_PCT * 100)}%")
-m3.metric("基準停利", f"{int(FIXED_BASE_TAKE_PROFIT_PCT * 100)}%")
+m2.metric("盤面狀態", st.session_state.get("market_state", "資料不足"))
+m3.metric("風險模式", st.session_state.get("risk_mode", "防守模式"))
 m4.metric("推薦檔數", f"{FIXED_MAX_RECOMMEND} 檔")
 
 i1, i2, i3 = st.columns(3)
 with i1:
     st.markdown(f'<div class="soft-box"><b>最後刷新時間</b><br>{now_str()}</div>', unsafe_allow_html=True)
 with i2:
-    st.markdown(f'<div class="soft-box"><b>盤面狀態</b><br>{st.session_state.get("market_state", "資料不足")}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="soft-box"><b>今日判斷</b><br>{st.session_state.get("verdict_title", "資料不足")}<br><span style="color:#c8b88a;">{st.session_state.get("verdict_text", "")}</span></div>', unsafe_allow_html=True)
 with i3:
-    st.markdown(
-        f'<div class="soft-box"><b>今日判斷</b><br>{st.session_state.get("verdict_title", "資料不足")}<br><span style="color:#c8b88a;">{st.session_state.get("verdict_text", "")}</span></div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(f'<div class="soft-box"><b>自動刷新</b><br>{"開啟" if st.session_state["auto_refresh"] else "關閉"} / {st.session_state["refresh_seconds"]} 秒</div>', unsafe_allow_html=True)
 
 with st.container():
     st.markdown('<div class="top-btn">', unsafe_allow_html=True)
-    if st.button("🚀 啟動 V18 市場掃描", use_container_width=True):
-        run_auto_market_scan_v18(capital)
+    if st.button("🚀 啟動 V19 市場掃描", use_container_width=True):
+        run_auto_market_scan_v19(capital)
     st.markdown("</div>", unsafe_allow_html=True)
 
 scan_df = as_object_df(st.session_state["scan_df"])
@@ -1130,9 +1169,10 @@ sector_df = as_object_df(st.session_state["sector_df"])
 weekly_summary = st.session_state["weekly_summary"]
 verdict_title = st.session_state["verdict_title"]
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🎯 主動推薦三檔",
     "📋 下單表",
+    "🧾 下單前確認",
     "💼 持股追蹤",
     "📈 回測績效",
     "📲 推播中心"
@@ -1180,7 +1220,7 @@ with tab1:
         st.dataframe(scan_df, use_container_width=True, hide_index=True)
 
 with tab2:
-    st.subheader("依總資金自動換算下單表")
+    st.subheader("下單表")
     if order_df.empty:
         st.info("尚無下單表。")
     else:
@@ -1194,11 +1234,36 @@ with tab2:
         st.download_button(
             "⬇️ 下載下單表 CSV",
             order_df.to_csv(index=False).encode("utf-8-sig"),
-            "god_view_v18_orders.csv",
+            "god_view_v19_orders.csv",
             "text/csv"
         )
 
 with tab3:
+    st.subheader("下單前最後確認")
+    if order_df.empty:
+        st.info("尚無可執行標的。")
+    else:
+        for _, row in order_df.iterrows():
+            st.markdown(
+                f"""
+                <div class="exec-card">
+                    <div class="title-xl">{clean_text(row.get("代碼"))}｜{clean_text(row.get("股名"))}</div>
+                    <div class="muted">{clean_text(row.get("族群"))}</div>
+                    <div class="kpi">開盤區：{clean_text(row.get("開盤可進場區"))}</div>
+                    <div>建議進場：{clean_text(row.get("建議進場價"))}</div>
+                    <div>停損：{clean_text(row.get("停損價"))}</div>
+                    <div>停利：{clean_text(row.get("第一停利價"))}</div>
+                    <div>建議資金：{clean_text(row.get("建議資金"))}</div>
+                    <div>建議張數：{clean_text(row.get("建議張數"))}</div>
+                    <div>預估單筆收益：{clean_text(row.get("預估單筆收益"))}</div>
+                    <div>操作摘要：{clean_text(row.get("操作摘要"))}</div>
+                    <div>風險標記：{clean_text(row.get("風險標記"))}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+with tab4:
     st.subheader("持股追蹤")
     pos_df = positions_df()
     edited_pos = st.data_editor(
@@ -1240,7 +1305,7 @@ with tab3:
         st.markdown("### 持股即時掃描")
         st.dataframe(position_scan_df, use_container_width=True, hide_index=True)
 
-with tab4:
+with tab5:
     st.subheader("簡易歷史回測 / 週績效曲線")
 
     if top3_df.empty:
@@ -1262,7 +1327,7 @@ with tab4:
         else:
             st.info("該標的回測樣本不足。")
 
-with tab5:
+with tab6:
     st.subheader("LINE 推播中心")
     line_text = build_priority_alerts(top3_df, weekly_summary, verdict_title, order_df)
     st.code(line_text)
@@ -1277,4 +1342,4 @@ with tab5:
     st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown("---")
-st.caption("上帝視角 V18｜實戰版｜AI 動態停損 + 回測 + 週績效曲線 + LINE 推播")
+st.caption("上帝視角 V19｜半自動操盤版｜盤中自動刷新 + 風險模式切換 + 下單前確認面板")
